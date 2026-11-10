@@ -1,0 +1,330 @@
+import sys
+
+import pytest
+
+from tracecode import RecordingLimitExceeded, TraceRecorder
+
+
+def load_function(tmp_path, source, name="run", namespace=None):
+    filename = tmp_path / f"{name}.py"
+    filename.write_text(source)
+    scope = {} if namespace is None else namespace
+    exec(compile(source, str(filename), "exec"), scope)
+    return scope[name], filename
+
+
+def decode_value(value):
+    value_type = value["type"]
+    data = value["data"]
+    if value_type == "dict":
+        return {decode_value(key): decode_value(item) for key, item in data}
+    if value_type == "list":
+        return [decode_value(item) for item in data]
+    if value_type == "tuple":
+        return tuple(decode_value(item) for item in data)
+    if value_type == "opaque":
+        return {"opaque": data["python_type"]}
+    if value_type in {"NoneType", "bool", "int", "float", "str"}:
+        return data
+    return decode_value(data)
+
+
+def decode_mapping(value):
+    assert isinstance(value, dict)
+    return {name: decode_value(item) for name, item in value.items()}
+
+
+def record_function(func, filename, **options):
+    recorder = TraceRecorder(target_file=str(filename), **options)
+    with recorder:
+        result = func()
+    return result, recorder.recording
+
+
+def test_line_snapshots_capture_state_before_each_line(tmp_path):
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    value = 1\n"
+        "    value = 2\n"
+        "    return value\n",
+    )
+
+    result, recording = record_function(func, filename)
+
+    assert result == 2
+    lines = [snapshot for snapshot in recording if snapshot["event"] == "line"]
+    values = [decode_mapping(snapshot["locals"])["value"] for snapshot in lines[1:]]
+    assert values == [1, 2]
+    assert recording[-1]["event"] == "return"
+    assert recording[-1]["return"] == {"value": {"type": "int", "data": 2}}
+
+
+def test_serializes_json_primitives_with_type_and_data(tmp_path):
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    return [None, True, 2, 1.5, 'hello']\n",
+    )
+
+    _, recording = record_function(func, filename)
+
+    returned = next(snapshot["return"]["value"] for snapshot in recording if snapshot["event"] == "return")
+    assert returned == {
+        "type": "list",
+        "data": [
+            {"type": "NoneType", "data": None},
+            {"type": "bool", "data": True},
+            {"type": "int", "data": 2},
+            {"type": "float", "data": 1.5},
+            {"type": "str", "data": "hello"},
+        ],
+    }
+
+
+def test_serializes_collections_and_keeps_snapshots_independent(tmp_path):
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    value = {1: (2, [3])}\n"
+        "    value[1][1].append(4)\n"
+        "    return value\n",
+    )
+
+    _, recording = record_function(func, filename)
+
+    before_mutation = next(
+        snapshot
+        for snapshot in recording
+        if snapshot["event"] == "line" and snapshot["lineno"] == 3
+    )
+    after_mutation = next(
+        snapshot
+        for snapshot in recording
+        if snapshot["event"] == "line" and snapshot["lineno"] == 4
+    )
+    original_value = decode_mapping(before_mutation["locals"])["value"]
+    mutated_value = decode_mapping(after_mutation["locals"])["value"]
+
+    assert original_value == {1: (2, [3])}
+    assert mutated_value == {1: (2, [3, 4])}
+
+
+def test_snapshots_include_function_and_qualified_function_names(tmp_path):
+    func, filename = load_function(
+        tmp_path,
+        "def outer():\n"
+        "    def inner():\n"
+        "        return 7\n"
+        "    return inner()\n",
+        name="outer",
+    )
+
+    _, recording = record_function(func, filename)
+
+    names = {(snapshot["function"], snapshot["qualified_function"]) for snapshot in recording}
+    assert ("outer", "outer") in names
+    assert ("inner", "outer.<locals>.inner") in names
+
+
+def test_records_exceptions_that_are_handled(tmp_path):
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    try:\n"
+        "        raise ValueError('bad')\n"
+        "    except ValueError:\n"
+        "        return 'handled'\n",
+    )
+
+    result, recording = record_function(func, filename)
+
+    assert result == "handled"
+    exception = next(snapshot["exception"] for snapshot in recording if snapshot["event"] == "exception")
+    assert exception["type"] == "ValueError"
+    assert exception["args"] == {"type": "tuple", "data": [{"type": "str", "data": "bad"}]}
+    assert any(snapshot["event"] == "return" for snapshot in recording)
+
+
+def test_records_only_frames_from_target_file(tmp_path):
+    target, target_file = load_function(
+        tmp_path,
+        "def target():\n"
+        "    return 42\n",
+        name="target",
+        namespace={},
+    )
+    wrapper, wrapper_file = load_function(
+        tmp_path,
+        "def wrapper():\n"
+        "    return target()\n",
+        name="wrapper",
+        namespace={"target": target},
+    )
+    recorder = TraceRecorder(target_file=str(target_file))
+
+    with recorder:
+        assert wrapper() == 42
+
+    assert recorder.recording
+    assert {snapshot["filename"] for snapshot in recorder.recording} == {str(target_file)}
+    assert str(wrapper_file) not in {snapshot["filename"] for snapshot in recorder.recording}
+
+
+def test_custom_serializers_use_first_match_and_copy_output(tmp_path):
+    class Parent:
+        def __init__(self):
+            self.items = [1]
+
+    class Child(Parent):
+        pass
+
+    func, filename = load_function(
+        tmp_path,
+        "def run(value):\n"
+        "    value.items.append(2)\n"
+        "    return value\n",
+    )
+    value = Child()
+    recorder = TraceRecorder(
+        [
+            (
+                Parent,
+                lambda obj: {"selected": "parent", "items": obj.items},
+            ),
+            (Child, lambda obj: {"selected": "child"}),
+        ],
+        target_file=str(filename),
+    )
+
+    with recorder:
+        assert func(value) is value
+
+    snapshots = [snapshot for snapshot in recorder.recording if snapshot["event"] == "line"]
+    before = decode_mapping(snapshots[0]["locals"])["value"]
+    after = decode_mapping(snapshots[1]["locals"])["value"]
+    assert before == {"selected": "parent", "items": [1]}
+    assert after == {"selected": "parent", "items": [1, 2]}
+    encoded_before = snapshots[0]["locals"]["value"]
+    assert encoded_before["type"] == f"{Child.__module__}.{Child.__qualname__}"
+    assert encoded_before["data"]["type"] == "dict"
+
+
+def test_opaque_values_do_not_call_repr(tmp_path):
+    class Opaque:
+        def __repr__(self):
+            raise AssertionError("repr must not be called")
+
+    func, filename = load_function(tmp_path, "def run(value):\n    return value\n")
+    recorder = TraceRecorder(target_file=str(filename))
+
+    with recorder:
+        func(Opaque())
+
+    encoded_value = recorder.recording[0]["locals"]["value"]
+    assert encoded_value == {
+        "type": "opaque",
+        "data": {"python_type": f"{Opaque.__module__}.{Opaque.__qualname__}"},
+    }
+
+
+@pytest.mark.parametrize(
+    ("options", "expected_snapshots"),
+    [
+        ({"max_snapshots": 1}, 1),
+        ({"max_depth": 0}, 1),
+        ({"max_items": 1}, 1),
+    ],
+)
+def test_limits_raise_and_preserve_recorded_snapshots(tmp_path, options, expected_snapshots):
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    value = [1]\n"
+        "    return value\n",
+    )
+    recorder = TraceRecorder(target_file=str(filename), **options)
+    previous_trace = sys.gettrace()
+
+    with pytest.raises(RecordingLimitExceeded):
+        with recorder:
+            func()
+
+    assert len(recorder.recording) == expected_snapshots
+    assert isinstance(recorder.recording, list)
+    assert sys.gettrace() is previous_trace
+
+
+def test_user_can_catch_limit_error_and_get_partial_snapshots(tmp_path):
+    namespace = {"RecordingLimitExceeded": RecordingLimitExceeded}
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    try:\n"
+        "        value = 1\n"
+        "    except RecordingLimitExceeded:\n"
+        "        return 'handled'\n",
+        namespace=namespace,
+    )
+    recorder = TraceRecorder(target_file=str(filename), max_snapshots=1)
+    previous_trace = sys.gettrace()
+
+    with recorder:
+        result = func()
+
+    assert result == "handled"
+    assert len(recorder.recording) == 1
+    assert sys.gettrace() is previous_trace
+
+
+def test_restores_previous_trace_when_limit_is_caught(tmp_path):
+    namespace = {"RecordingLimitExceeded": RecordingLimitExceeded}
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    try:\n"
+        "        value = 1\n"
+        "    except RecordingLimitExceeded:\n"
+        "        return 'handled'\n",
+        namespace=namespace,
+    )
+    previous_trace = sys.gettrace()
+
+    def existing_trace(frame, event, arg):
+        return existing_trace
+
+    recorder = TraceRecorder(target_file=str(filename), max_snapshots=1)
+    try:
+        sys.settrace(existing_trace)
+        with recorder:
+            assert func() == "handled"
+        assert sys.gettrace() is existing_trace
+    finally:
+        sys.settrace(previous_trace)
+
+
+def test_serializer_error_propagates_and_restores_trace(tmp_path):
+    class Value:
+        pass
+
+    def broken_serializer(value):
+        raise LookupError("serializer failed")
+
+    func, filename = load_function(tmp_path, "def run(value):\n    return value\n")
+    recorder = TraceRecorder([(Value, broken_serializer)], target_file=str(filename))
+    previous_trace = sys.gettrace()
+
+    with pytest.raises(LookupError, match="serializer failed"):
+        with recorder:
+            func(Value())
+
+    assert sys.gettrace() is previous_trace
+
+
+def test_invalid_limits_are_rejected():
+    with pytest.raises(ValueError):
+        TraceRecorder(max_snapshots=0)
+    with pytest.raises(ValueError):
+        TraceRecorder(max_depth=-1)
+    with pytest.raises(ValueError):
+        TraceRecorder(max_items=0)

@@ -9,6 +9,7 @@ dependencies = []
 [dependency-groups]
 dev = [
     "myteam>=0.3.21",
+    "pytest>=9.2.0",
     "rosters",
 ]
 

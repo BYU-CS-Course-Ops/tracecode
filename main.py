@@ -22,10 +22,13 @@ def work():
 
 
 def main():
-    recorder = TraceRecorder([(CustomObj, lambda co: {...})])
+    recorder = TraceRecorder(
+        [(CustomObj, lambda co: {"num": getattr(co, "_num", None)})]
+    )
     with recorder:
         work()
-    print(recorder.recording)  # i.e. the user does what they want with it
+    for record in recorder.recording:
+        print(record)  # i.e. the user does what they want with it
 
 
 if __name__ == "__main__":
