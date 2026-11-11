@@ -1,4 +1,7 @@
-from tracecode import TraceRecorder
+from pathlib import Path
+import webbrowser
+
+from tracecode import TraceRecorder, write_html_view
 
 
 class CustomObj:
@@ -27,8 +30,13 @@ def main():
     )
     with recorder:
         work()
-    for record in recorder.recording:
-        print(record)  # i.e. the user does what they want with it
+
+    output_path = write_html_view(
+        recorder.recording,
+        Path(__file__).resolve().with_suffix(".html"),
+    )
+    webbrowser.open(output_path.resolve().as_uri())
+    print(f"Trace viewer written to {output_path}")
 
 
 if __name__ == "__main__":

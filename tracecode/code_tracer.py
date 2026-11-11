@@ -3,12 +3,13 @@ from __future__ import annotations
 import inspect
 import os
 import sys
+import tokenize
 from types import TracebackType
 from typing import Any, Callable, Protocol
 
 
 class Serializer(Protocol):
-    def __call__(self, item: Any) -> Any: ...
+    def __call__(self, item: Any, /) -> Any: ...
 
 
 class RecordingLimitExceeded(RuntimeError):
@@ -37,6 +38,7 @@ class TraceRecorder:
         self._previous_trace: Callable | None = None
         self._active = False
         self._recording: list[dict[str, Any]] = []
+        self._snapshot_count = 0
 
     @property
     def recording(self) -> list[dict[str, Any]]:
@@ -50,6 +52,13 @@ class TraceRecorder:
             if caller is None:
                 raise RuntimeError("Cannot determine target source file")
             self._target_file = os.path.realpath(caller.f_code.co_filename)
+        with tokenize.open(self._target_file) as source_file:
+            source = source_file.read()
+        self._recording.clear()
+        self._snapshot_count = 0
+        self._recording.append(
+            {"event": "source", "filename": self._target_file, "source": source}
+        )
         self._previous_trace = sys.gettrace()
         self._active = True
         sys.settrace(self._trace)
@@ -76,15 +85,26 @@ class TraceRecorder:
             if os.path.realpath(frame.f_code.co_filename) != self._target_file:
                 return self._trace
             if event in ("line", "return", "exception"):
-                if len(self._recording) >= self._max_snapshots:
-                    raise RecordingLimitExceeded(
-                        f"Recording exceeded the {self._max_snapshots}-snapshot limit"
-                    )
-                self._recording.append(self._snapshot(frame, event, arg))
+                self._record_snapshot(frame, event, arg)
+                caller = frame.f_back
+                if (
+                    event == "return"
+                    and caller is not None
+                    and os.path.realpath(caller.f_code.co_filename) == self._target_file
+                ):
+                    self._record_snapshot(caller, "call_return", (frame, arg))
         except BaseException:
             self._stop_tracing()
             raise
         return self._trace
+
+    def _record_snapshot(self, frame, event: str, arg):
+        if self._snapshot_count >= self._max_snapshots:
+            raise RecordingLimitExceeded(
+                f"Recording exceeded the {self._max_snapshots}-snapshot limit"
+            )
+        self._recording.append(self._snapshot(frame, event, arg))
+        self._snapshot_count += 1
 
     def _snapshot(self, frame, event: str, arg) -> dict[str, Any]:
         budget = [0]
@@ -104,6 +124,7 @@ class TraceRecorder:
             snapshot["globals"] = self._serialize_scope(
                 self._visible_values(frame.f_globals), budget
             )
+        snapshot["callers"] = self._capture_callers(frame.f_back, budget)
 
         if event == "return":
             snapshot["return"] = {"value": self._serialize(arg, 0, budget)}
@@ -113,7 +134,34 @@ class TraceRecorder:
                 "type": self._type_name(exception),
                 "args": self._serialize(exception.args, 0, budget),
             }
+        elif event == "call_return":
+            returned_frame, value = arg
+            snapshot["call_return"] = {
+                "function": returned_frame.f_code.co_name,
+                "qualified_function": returned_frame.f_code.co_qualname,
+                "value": self._serialize(value, 0, budget),
+            }
         return snapshot
+
+    def _capture_callers(self, frame, budget: list[int]) -> list[dict[str, Any]]:
+        callers = []
+        while frame is not None:
+            if (
+                frame.f_code.co_name != "<module>"
+                and os.path.realpath(frame.f_code.co_filename) == self._target_file
+            ):
+                callers.append(
+                    {
+                        "function": frame.f_code.co_name,
+                        "qualified_function": frame.f_code.co_qualname,
+                        "lineno": frame.f_lineno,
+                        "locals": self._serialize_scope(
+                            self._visible_values(frame.f_locals), budget
+                        ),
+                    }
+                )
+            frame = frame.f_back
+        return list(reversed(callers))
 
     def _serialize_scope(self, values: dict[str, Any], budget: list[int]) -> dict[str, Any]:
         return {name: self._serialize(value, 0, budget) for name, value in values.items()}

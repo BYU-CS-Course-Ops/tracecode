@@ -53,6 +53,9 @@ def test_line_snapshots_capture_state_before_each_line(tmp_path):
     result, recording = record_function(func, filename)
 
     assert result == 2
+    assert recording[0]["event"] == "source"
+    assert recording[0]["filename"] == str(filename)
+    assert recording[0]["source"] == filename.read_text()
     lines = [snapshot for snapshot in recording if snapshot["event"] == "line"]
     values = [decode_mapping(snapshot["locals"])["value"] for snapshot in lines[1:]]
     assert values == [1, 2]
@@ -122,9 +125,71 @@ def test_snapshots_include_function_and_qualified_function_names(tmp_path):
 
     _, recording = record_function(func, filename)
 
-    names = {(snapshot["function"], snapshot["qualified_function"]) for snapshot in recording}
+    names = {
+        (snapshot["function"], snapshot["qualified_function"])
+        for snapshot in recording
+        if snapshot["event"] != "source"
+    }
     assert ("outer", "outer") in names
     assert ("inner", "outer.<locals>.inner") in names
+
+
+def test_function_return_records_return_site_and_call_site(tmp_path):
+    func, filename = load_function(
+        tmp_path,
+        "def caller():\n"
+        "    result = foo()\n"
+        "    return result\n"
+        "def foo():\n"
+        "    return 7\n",
+        name="caller",
+    )
+
+    _, recording = record_function(func, filename)
+
+    return_index = next(
+        index
+        for index, snapshot in enumerate(recording)
+        if snapshot["event"] == "return" and snapshot["function"] == "foo"
+    )
+    returned = recording[return_index]
+    call_return = recording[return_index + 1]
+
+    assert returned["lineno"] == 5
+    assert returned["return"]["value"] == {"type": "int", "data": 7}
+    assert call_return["event"] == "call_return"
+    assert call_return["function"] == "caller"
+    assert call_return["lineno"] == 2
+    assert call_return["call_return"] == {
+        "function": "foo",
+        "qualified_function": "foo",
+        "value": {"type": "int", "data": 7},
+    }
+
+
+def test_snapshots_capture_callers_oldest_first(tmp_path):
+    func, filename = load_function(
+        tmp_path,
+        "def outer():\n"
+        "    outer_value = 'outer'\n"
+        "    def inner():\n"
+        "        inner_value = 2\n"
+        "        return inner_value\n"
+        "    return inner()\n",
+        name="outer",
+    )
+
+    _, recording = record_function(func, filename)
+
+    inner_snapshot = next(
+        snapshot
+        for snapshot in recording
+        if snapshot["event"] == "line" and snapshot["function"] == "inner"
+    )
+    callers = inner_snapshot["callers"]
+    assert [caller["qualified_function"] for caller in callers] == ["outer"]
+    assert callers[0]["lineno"] == 6
+    assert decode_mapping(callers[0]["locals"])["outer_value"] == "outer"
 
 
 def test_records_exceptions_that_are_handled(tmp_path):
@@ -221,7 +286,8 @@ def test_opaque_values_do_not_call_repr(tmp_path):
     with recorder:
         func(Opaque())
 
-    encoded_value = recorder.recording[0]["locals"]["value"]
+    first_snapshot = next(record for record in recorder.recording if record["event"] == "line")
+    encoded_value = first_snapshot["locals"]["value"]
     assert encoded_value == {
         "type": "opaque",
         "data": {"python_type": f"{Opaque.__module__}.{Opaque.__qualname__}"},
@@ -250,7 +316,7 @@ def test_limits_raise_and_preserve_recorded_snapshots(tmp_path, options, expecte
         with recorder:
             func()
 
-    assert len(recorder.recording) == expected_snapshots
+    assert sum(record["event"] != "source" for record in recorder.recording) == expected_snapshots
     assert isinstance(recorder.recording, list)
     assert sys.gettrace() is previous_trace
 
@@ -273,7 +339,7 @@ def test_user_can_catch_limit_error_and_get_partial_snapshots(tmp_path):
         result = func()
 
     assert result == "handled"
-    assert len(recorder.recording) == 1
+    assert sum(record["event"] != "source" for record in recorder.recording) == 1
     assert sys.gettrace() is previous_trace
 
 
