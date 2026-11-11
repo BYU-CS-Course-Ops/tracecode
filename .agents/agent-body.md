@@ -1,11 +1,9 @@
+{{ read_file('project.md') }}
+
 {{ read_file(rosters() + '/agents/general-agent-behavior.md') }}
-
-{{ read_file('dev/code-planning.md') }}
-
-{{ read_file('dev/code-style.md') }}
 
 {{ myteam_explain() }}
 
-{{ myteam_list('dev/skills') }}
+{{ myteam_list(rosters() + '/agents/skills') }}
 
-{{ read_file('dev/project-specific-instructions.md.jinja') }}
+{# {{ myteam_list&#40;'dev/skills'&#41; }} #}

@@ -6,5 +6,8 @@ dist/
 wheels/
 *.egg-info
 
+# Agent scratch files
+.agents/scratch/
+
 # Virtual environments
 .venv
