@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import webbrowser
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,11 @@ _TEMPLATE = Path(__file__).with_name("trace_viewer.html")
 _DATA_MARKER = "__TRACE_RECORDING_JSON__"
 
 
-def write_html_view(recording: list[dict[str, Any]], output_path: str | Path) -> Path:
+def write_html_view(
+    recording: list[dict[str, Any]],
+    output_path: str | Path,
+    auto_open: bool = False,
+) -> Path:
     """Write a standalone HTML viewer for a source record and its trace snapshots."""
     source_records = [record for record in recording if record.get("event") == "source"]
     if len(source_records) != 1:
@@ -40,4 +45,6 @@ def write_html_view(recording: list[dict[str, Any]], output_path: str | Path) ->
         raise RuntimeError(f"Expected one recording-data marker in {_TEMPLATE}")
 
     output_path.write_text(template.replace(_DATA_MARKER, safe_payload), encoding="utf-8")
+    if auto_open:
+        webbrowser.open(output_path.resolve().as_uri())
     return output_path

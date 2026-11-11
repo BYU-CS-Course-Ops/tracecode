@@ -1,5 +1,4 @@
 from pathlib import Path
-import webbrowser
 
 from tracecode import TraceRecorder, write_html_view
 
@@ -31,12 +30,11 @@ def main():
     with recorder:
         work()
 
-    output_path = write_html_view(
+    write_html_view(
         recorder.recording,
         Path(__file__).resolve().with_suffix(".html"),
+        auto_open=True,
     )
-    webbrowser.open(output_path.resolve().as_uri())
-    print(f"Trace viewer written to {output_path}")
 
 
 if __name__ == "__main__":

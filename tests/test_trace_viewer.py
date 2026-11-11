@@ -33,15 +33,30 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert result == output_path
     assert payload == {"filename": "student.py", "source": source, "recording": [snapshot]}
     assert "</script>" not in embedded_json
-    assert "</textarea>" not in html
+    assert "</textarea>" not in embedded_json
     assert "Previous" in html and "Next" in html
     assert "textContent = line" in html
+    assert 'id="source-fallback"' in html
+    assert "async function enableCodeMirror()" in html
+    assert "codemirror/5.65.5" in html
+    assert "readOnly: true" in html and "mode: 'python'" in html
+    assert "sourceFallback.hidden = true" in html
     assert 'id="frames"' in html and "className = 'frame-card'" in html
+    assert 'id="event-info"' not in html and "eventInfo" not in html
+    assert '.frame-heading code { font-weight: 700; }' in html
+    assert "document.createElement('code')" in html
     assert "snapshot.callers" in html and "variable-card" in html
     assert "frame.call_return" in html and "return-notice" in html
     assert html.index("card.appendChild(variable)") < html.index("card.appendChild(notice)")
-    assert "displayType(value)" in html and "variable.append(label, type, renderedValue)" in html
+    assert "displayType(value)" in html and "variable.append(label, type, renderedValue)" not in html
+    assert "if (value.type !== 'opaque')" in html
+    assert "typeName.split('.')" in html
+    assert "value.type === 'opaque' ? '' : ':'" in html
     assert "inline.length <= 20" in html
+    assert "font-size: 1rem; font-weight: 700" in html
+    assert "background: #f5f7fa; font-size: 1rem" in html
+    assert "font: 1rem ui-monospace" in html
+    assert "font: 1rem/1.35 ui-monospace" in html
     assert ".source-line.call-site" in html and "caller.lineno" in html
     assert "frame.locals" in html and "frame.globals" not in html
     assert "overflow: auto" in html

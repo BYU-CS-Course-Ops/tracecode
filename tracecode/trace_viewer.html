@@ -36,7 +36,12 @@
       border-radius: .35rem;
       background: white;
     }
-    #source { padding: .4rem 0; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #source { position: relative; padding: 0; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #source-fallback { min-height: 100%; padding: .4rem 0; box-sizing: border-box; }
+    #source-editor { display: none; }
+    .CodeMirror { height: 100%; width: 100%; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .CodeMirror-linebackground.call-site { background: #eceff3; }
+    .CodeMirror-linebackground.current { background: #fff0a6; }
     .source-line { display: grid; grid-template-columns: 3.25rem 1fr; min-height: 1.45em; }
     .source-line.call-site { background: #eceff3; }
     .source-line.current { background: #fff0a6; }
@@ -46,15 +51,15 @@
     button { padding: .35rem .7rem; }
     button:disabled { opacity: .5; }
     #position { margin-left: auto; font-variant-numeric: tabular-nums; }
-    #event-info { flex: none; margin: 0 0 .4rem; font-size: .9rem; font-weight: 600; }
     #frames { display: flex; flex-direction: column; gap: .45rem; padding: .4rem; box-sizing: border-box; }
     .frame-card { flex: none; overflow: hidden; border: 1px solid #cbd2dc; border-radius: .3rem; background: white; }
-    .frame-heading { padding: .3rem .5rem; background: #e9edf3; font-size: .82rem; font-weight: 650; overflow-wrap: anywhere; }
-    .return-notice { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem; border-top: 1px solid #edf0f4; padding: .3rem .5rem; background: #f5f7fa; font-size: .82rem; }
+    .frame-heading { padding: .4rem .55rem; background: #e9edf3; font-size: 1rem; font-weight: 500; overflow-wrap: anywhere; }
+    .frame-heading code { font-weight: 700; }
+    .return-notice { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem; border-top: 1px solid #edf0f4; padding: .3rem .5rem; background: #f5f7fa; font-size: 1rem; }
     .variable-card { display: flex; align-items: baseline; gap: .55rem; border-top: 1px solid #edf0f4; padding: .25rem .5rem; }
-    .variable-name { flex: none; min-width: 0; font-size: .82rem; font-weight: 700; overflow-wrap: anywhere; }
-    .variable-type { flex: none; color: #626a76; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .variable-value { flex: 1; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .variable-name { flex: none; min-width: 0; font-size: 1rem; font-weight: 700; overflow-wrap: anywhere; }
+    .variable-type { flex: none; color: #626a76; font: 1rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .variable-value { flex: 1; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 1rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
     .empty-state { padding: .5rem; color: #666; font-style: italic; }
     @media (max-width: 760px) {
       body { height: auto; min-height: 100%; overflow: auto; }
@@ -72,7 +77,10 @@
   <main>
     <section aria-label="Original source code">
       <h2>Source</h2>
-      <div id="source" role="region" aria-label="Source code"></div>
+      <div id="source" role="region" aria-label="Source code">
+        <div id="source-fallback"></div>
+        <textarea id="source-editor" aria-label="Source code editor"></textarea>
+      </div>
       <div id="controls">
         <button id="previous" type="button">Previous</button>
         <button id="next" type="button">Next</button>
@@ -81,7 +89,6 @@
     </section>
     <section aria-label="Call stack and locals">
       <h2>Call stack</h2>
-      <p id="event-info" aria-live="polite"></p>
       <div id="frames" role="region" aria-label="Call frames"></div>
     </section>
   </main>
@@ -90,15 +97,16 @@
     const recordingData = JSON.parse(document.getElementById('trace-data').textContent);
     const sourceLines = recordingData.source.split(/\r\n|\n|\r/);
     const snapshots = recordingData.recording;
-    const source = document.getElementById('source');
+    const sourceFallback = document.getElementById('source-fallback');
+    const sourceEditorElement = document.getElementById('source-editor');
     const frames = document.getElementById('frames');
-    const eventInfo = document.getElementById('event-info');
     const position = document.getElementById('position');
     const previousButton = document.getElementById('previous');
     const nextButton = document.getElementById('next');
     let index = 0;
     let highlightedLine = null;
     let highlightedCallerLines = new Set();
+    let codeEditor = null;
 
     function renderSource() {
       const fragment = document.createDocumentFragment();
@@ -118,7 +126,45 @@
         row.append(lineNumber, text);
         fragment.appendChild(row);
       });
-      source.replaceChildren(fragment);
+      sourceFallback.replaceChildren(fragment);
+    }
+
+    function setLineClass(lineNumber, className, enabled) {
+      if (!Number.isInteger(lineNumber) || lineNumber < 1) return;
+      if (codeEditor) {
+        if (lineNumber > codeEditor.lineCount()) return;
+        const method = enabled ? 'addLineClass' : 'removeLineClass';
+        codeEditor[method](lineNumber - 1, 'background', className);
+        return;
+      }
+      document.getElementById(`source-line-${lineNumber}`)?.classList.toggle(className, enabled);
+    }
+
+    function updateSourceHighlights() {
+      if (highlightedLine !== null) setLineClass(highlightedLine, 'current', false);
+      for (const lineNumber of highlightedCallerLines) {
+        setLineClass(lineNumber, 'call-site', false);
+      }
+
+      const snapshot = snapshots[index];
+      if (!snapshot) return;
+      highlightedCallerLines = new Set(
+        (snapshot.callers || [])
+          .map(caller => caller.lineno)
+          .filter(Number.isInteger)
+      );
+      for (const lineNumber of highlightedCallerLines) {
+        setLineClass(lineNumber, 'call-site', true);
+      }
+      highlightedLine = Number.isInteger(snapshot.lineno) ? snapshot.lineno : null;
+      if (highlightedLine !== null) {
+        setLineClass(highlightedLine, 'current', true);
+        if (codeEditor && highlightedLine <= codeEditor.lineCount()) {
+          codeEditor.scrollIntoView({ line: highlightedLine - 1, ch: 0 }, 100);
+        } else {
+          document.getElementById(`source-line-${highlightedLine}`)?.scrollIntoView({ block: 'nearest' });
+        }
+      }
     }
 
     function formatInline(value) {
@@ -165,7 +211,13 @@
     }
 
     function displayType(value) {
-      return value.type === 'opaque' ? value.data.python_type : value.type;
+      const typeName = value.type === 'opaque' ? value.data.python_type : value.type;
+      const parts = typeName.split('.').filter(part => part && part !== '<locals>');
+      return parts[parts.length - 1] || typeName;
+    }
+
+    function displayTypeLabel(value) {
+      return `(${displayType(value)})${value.type === 'opaque' ? '' : ':'}`;
     }
 
     function renderFrame(frame, isCurrent = false) {
@@ -175,7 +227,9 @@
 
       const heading = document.createElement('div');
       heading.className = 'frame-heading';
-      heading.textContent = `${frame.qualified_function} · line ${frame.lineno}`;
+      const functionName = document.createElement('code');
+      functionName.textContent = frame.qualified_function;
+      heading.append(functionName, ` · line ${frame.lineno}`);
       card.appendChild(heading);
 
       const entries = Object.entries(frame.locals || {});
@@ -195,13 +249,15 @@
 
           const type = document.createElement('span');
           type.className = 'variable-type';
-          type.textContent = `(${displayType(value)}):`;
+          type.textContent = displayTypeLabel(value);
 
-          const renderedValue = document.createElement('pre');
-          renderedValue.className = 'variable-value';
-          renderedValue.textContent = formatValue(value);
-
-          variable.append(label, type, renderedValue);
+          variable.append(label, type);
+          if (value.type !== 'opaque') {
+            const renderedValue = document.createElement('pre');
+            renderedValue.className = 'variable-value';
+            renderedValue.textContent = formatValue(value);
+            variable.appendChild(renderedValue);
+          }
           card.appendChild(variable);
         }
       }
@@ -221,12 +277,14 @@
         notice.append(functionName, ' returned ');
 
         const returnType = document.createElement('span');
-        returnType.textContent = `(${displayType(returned.value)}):`;
+        returnType.textContent = displayTypeLabel(returned.value);
         notice.append(returnType);
 
-        const returnValue = document.createElement('code');
-        returnValue.textContent = formatValue(returned.value);
-        notice.append(returnValue);
+        if (returned.value.type !== 'opaque') {
+          const returnValue = document.createElement('code');
+          returnValue.textContent = formatValue(returned.value);
+          notice.append(returnValue);
+        }
         card.appendChild(notice);
       }
       return card;
@@ -245,38 +303,18 @@
     function renderSnapshot() {
       const snapshot = snapshots[index];
       if (!snapshot) {
-        eventInfo.textContent = 'No snapshots were recorded.';
         frames.replaceChildren();
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No snapshots were recorded.';
+        frames.appendChild(empty);
         position.textContent = '0 / 0';
         previousButton.disabled = true;
         nextButton.disabled = true;
         return;
       }
 
-      if (highlightedLine !== null) {
-        document.getElementById(`source-line-${highlightedLine}`)?.classList.remove('current');
-      }
-      for (const lineNumber of highlightedCallerLines) {
-        document.getElementById(`source-line-${lineNumber}`)?.classList.remove('call-site');
-      }
-
-      highlightedCallerLines = new Set(
-        (snapshot.callers || [])
-          .map(caller => caller.lineno)
-          .filter(Number.isInteger)
-      );
-      for (const lineNumber of highlightedCallerLines) {
-        document.getElementById(`source-line-${lineNumber}`)?.classList.add('call-site');
-      }
-
-      highlightedLine = Number.isInteger(snapshot.lineno) ? snapshot.lineno : null;
-      if (highlightedLine !== null) {
-        const line = document.getElementById(`source-line-${highlightedLine}`);
-        line?.classList.add('current');
-        line?.scrollIntoView({ block: 'nearest' });
-      }
-
-      eventInfo.textContent = `${snapshot.event} · ${snapshot.qualified_function} · line ${snapshot.lineno}`;
+      updateSourceHighlights();
       renderCallStack(snapshot);
       position.textContent = `${index + 1} / ${snapshots.length}`;
       previousButton.disabled = index === 0;
@@ -297,6 +335,7 @@
     });
     document.addEventListener('keydown', event => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.target.closest?.('.CodeMirror')) return;
       if (event.key === 'ArrowLeft' && index > 0) {
         index -= 1;
         renderSnapshot();
@@ -306,9 +345,62 @@
       }
     });
 
+    function loadStylesheet(url) {
+      return new Promise((resolve, reject) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = url;
+        link.onload = resolve;
+        link.onerror = () => reject(new Error(`Could not load stylesheet: ${url}`));
+        document.head.appendChild(link);
+      });
+    }
+
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = url;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Could not load script: ${url}`));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function enableCodeMirror() {
+      const cdn = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5';
+      try {
+        await Promise.all([
+          loadStylesheet(`${cdn}/codemirror.min.css`),
+          loadStylesheet(`${cdn}/theme/idea.css`),
+        ]);
+        await loadScript(`${cdn}/codemirror.min.js`);
+        await loadScript(`${cdn}/mode/python/python.min.js`);
+        if (!window.CodeMirror || !window.CodeMirror.modes.python) return;
+
+        sourceEditorElement.value = recordingData.source;
+        codeEditor = window.CodeMirror.fromTextArea(sourceEditorElement, {
+          mode: 'python',
+          readOnly: true,
+          lineNumbers: true,
+          theme: 'idea',
+        });
+        codeEditor.setSize('100%', '100%');
+        sourceFallback.hidden = true;
+        updateSourceHighlights();
+      } catch (error) {
+        if (codeEditor) {
+          codeEditor.toTextArea();
+          codeEditor = null;
+        }
+        sourceEditorElement.style.display = 'none';
+        sourceFallback.hidden = false;
+      }
+    }
+
     document.getElementById('title').textContent = recordingData.filename || 'Trace recording';
     renderSource();
     renderSnapshot();
+    enableCodeMirror();
   </script>
 </body>
 </html>
