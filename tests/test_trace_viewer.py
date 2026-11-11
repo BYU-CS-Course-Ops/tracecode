@@ -46,8 +46,16 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert '.frame-heading code { font-weight: 700; }' in html
     assert "document.createElement('code')" in html
     assert "snapshot.callers" in html and "variable-card" in html
+    assert "function renderException(exception)" in html
+    assert "Traceback (most recent call last):" in html
+    assert "exception.traceback" in html
+    assert "card.appendChild(renderException(frame.exception))" in html
+    assert html.index("for (const frame of exception.traceback") < html.index("notice.appendChild(summary)")
     assert "getWrapperElement().addEventListener('mousemove'" in html
     assert "codeEditor.on('mousemove'" not in html
+    assert "if (event.key === 'ArrowLeft')" in html
+    assert "if (event.key === 'ArrowRight')" in html
+    assert "event.target.closest?.('.CodeMirror')" not in html
     assert "frame.call_return" in html and "return-notice" in html
     assert html.index("card.appendChild(variable)") < html.index("card.appendChild(notice)")
     assert "displayType(value)" in html and "variable.append(label, type, renderedValue)" not in html

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import linecache
 import os
 import sys
 import tokenize
@@ -36,9 +37,13 @@ class TraceRecorder:
         self._max_items = max_items
         self._target_file = os.path.realpath(target_file) if target_file else None
         self._previous_trace: Callable | None = None
+        self._target_frame = None
+        self._previous_target_frame_trace = None
         self._active = False
         self._recording: list[dict[str, Any]] = []
         self._snapshot_count = 0
+        self._source_lines: list[str] = []
+        self._unwinding_frames: set[int] = set()
 
     @property
     def recording(self) -> list[dict[str, Any]]:
@@ -47,21 +52,33 @@ class TraceRecorder:
     def __enter__(self) -> TraceRecorder:
         if self._active:
             raise RuntimeError("TraceRecorder is already active")
+        caller = inspect.currentframe().f_back
         if self._target_file is None:
-            caller = inspect.currentframe().f_back
             if caller is None:
                 raise RuntimeError("Cannot determine target source file")
             self._target_file = os.path.realpath(caller.f_code.co_filename)
+        self._target_frame = (
+            caller
+            if caller is not None
+            and os.path.realpath(caller.f_code.co_filename) == self._target_file
+            else None
+        )
+        if self._target_frame is not None:
+            self._previous_target_frame_trace = self._target_frame.f_trace
         with tokenize.open(self._target_file) as source_file:
             source = source_file.read()
+        self._source_lines = source.splitlines()
         self._recording.clear()
         self._snapshot_count = 0
+        self._unwinding_frames.clear()
         self._recording.append(
             {"event": "source", "filename": self._target_file, "source": source}
         )
         self._previous_trace = sys.gettrace()
         self._active = True
         sys.settrace(self._trace)
+        if self._target_frame is not None:
+            self._target_frame.f_trace = self._trace
         return self
 
     def __exit__(
@@ -76,6 +93,10 @@ class TraceRecorder:
 
     def _stop_tracing(self):
         self._active = False
+        if self._target_frame is not None and self._target_frame.f_trace is self._trace:
+            self._target_frame.f_trace = self._previous_target_frame_trace
+        self._target_frame = None
+        self._previous_target_frame_trace = None
         sys.settrace(self._previous_trace)
 
     def _trace(self, frame, event: str, arg):
@@ -83,6 +104,15 @@ class TraceRecorder:
             return None
         try:
             if os.path.realpath(frame.f_code.co_filename) != self._target_file:
+                return self._trace
+            frame_id = id(frame)
+            if event == "line":
+                self._unwinding_frames.discard(frame_id)
+            elif event == "exception":
+                self._unwinding_frames.add(frame_id)
+            elif event == "return" and frame_id in self._unwinding_frames:
+                # The preceding exception snapshot already represents this frame's unwind.
+                self._unwinding_frames.discard(frame_id)
                 return self._trace
             if event in ("line", "return", "exception"):
                 self._record_snapshot(frame, event, arg)
@@ -129,10 +159,12 @@ class TraceRecorder:
         if event == "return":
             snapshot["return"] = {"value": self._serialize(arg, 0, budget)}
         elif event == "exception":
-            _, exception, _ = arg
+            _, exception, traceback = arg
             snapshot["exception"] = {
                 "type": self._type_name(exception),
+                "message": self._exception_message(exception),
                 "args": self._serialize(exception.args, 0, budget),
+                "traceback": self._capture_traceback(traceback),
             }
         elif event == "call_return":
             returned_frame, value = arg
@@ -142,6 +174,42 @@ class TraceRecorder:
                 "value": self._serialize(value, 0, budget),
             }
         return snapshot
+
+    def _exception_message(self, exception: BaseException) -> str:
+        previous_trace = sys.gettrace()
+        sys.settrace(None)
+        try:
+            return str(exception)
+        except BaseException:
+            return ""
+        finally:
+            sys.settrace(previous_trace)
+
+    def _capture_traceback(self, traceback: TracebackType | None) -> list[dict[str, Any]]:
+        frames = []
+        while traceback is not None:
+            frame = traceback.tb_frame
+            filename = frame.f_code.co_filename
+            lineno = traceback.tb_lineno
+            if os.path.realpath(filename) == self._target_file:
+                source = (
+                    self._source_lines[lineno - 1]
+                    if 0 < lineno <= len(self._source_lines)
+                    else ""
+                )
+            else:
+                source = linecache.getline(filename, lineno).rstrip("\r\n")
+            frames.append(
+                {
+                    "filename": filename,
+                    "lineno": lineno,
+                    "function": frame.f_code.co_name,
+                    "qualified_function": frame.f_code.co_qualname,
+                    "source": source,
+                }
+            )
+            traceback = traceback.tb_next
+        return frames
 
     def _capture_callers(self, frame, budget: list[int]) -> list[dict[str, Any]]:
         callers = []

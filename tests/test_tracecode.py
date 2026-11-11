@@ -207,8 +207,69 @@ def test_records_exceptions_that_are_handled(tmp_path):
     assert result == "handled"
     exception = next(snapshot["exception"] for snapshot in recording if snapshot["event"] == "exception")
     assert exception["type"] == "ValueError"
+    assert exception["message"] == "bad"
+    assert [frame["function"] for frame in exception["traceback"]] == ["run"]
     assert exception["args"] == {"type": "tuple", "data": [{"type": "str", "data": "bad"}]}
     assert any(snapshot["event"] == "return" for snapshot in recording)
+
+
+def test_exception_traceback_grows_outward_as_exception_unwinds(tmp_path):
+    func, filename = load_function(
+        tmp_path,
+        "def leaf():\n"
+        "    raise ValueError('bad input')\n"
+        "def middle():\n"
+        "    return leaf()\n"
+        "def outer():\n"
+        "    return middle()\n",
+        name="outer",
+        namespace={},
+    )
+    recorder = TraceRecorder(target_file=str(filename))
+
+    with pytest.raises(ValueError, match="bad input"):
+        with recorder:
+            func()
+
+    exceptions = [record["exception"] for record in recorder.recording if "exception" in record]
+    assert [
+        [frame["function"] for frame in exception["traceback"]]
+        for exception in exceptions
+    ] == [["leaf"], ["middle", "leaf"], ["outer", "middle", "leaf"]]
+    assert [
+        [frame["lineno"] for frame in exception["traceback"]]
+        for exception in exceptions
+    ] == [[2], [4, 2], [6, 4, 2]]
+    assert all(exception["type"] == "ValueError" for exception in exceptions)
+    assert all(exception["message"] == "bad input" for exception in exceptions)
+    assert exceptions[-1]["traceback"][-1]["source"] == "    raise ValueError('bad input')"
+    assert not any(
+        record["event"] == "return" and record["function"] in {"leaf", "middle", "outer"}
+        for record in recorder.recording
+    )
+
+
+def test_traceback_includes_frame_that_started_recording(tmp_path):
+    source = (
+        "def run(recorder):\n"
+        "    with recorder:\n"
+        "        try:\n"
+        "            outer()\n"
+        "        except ValueError:\n"
+        "            pass\n"
+        "def outer():\n"
+        "    raise ValueError('bad')\n"
+    )
+    filename = tmp_path / "run.py"
+    filename.write_text(source)
+    namespace = {}
+    exec(compile(source, str(filename), "exec"), namespace)
+    recorder = TraceRecorder(target_file=str(filename))
+
+    namespace["run"](recorder)
+
+    exceptions = [record["exception"] for record in recorder.recording if "exception" in record]
+    assert [frame["function"] for frame in exceptions[-1]["traceback"]] == ["run", "outer"]
 
 
 def test_records_only_frames_from_target_file(tmp_path):
