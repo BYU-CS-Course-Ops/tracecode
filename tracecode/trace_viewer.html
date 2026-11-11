@@ -37,16 +37,31 @@
       background: white;
     }
     #source { position: relative; padding: 0; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .CodeMirror-linebackground.jump-hover { background: #f3f5f8; }
     #source-fallback { min-height: 100%; padding: .4rem 0; box-sizing: border-box; }
     #source-editor { display: none; }
     .CodeMirror { height: 100%; width: 100%; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
     .CodeMirror-linebackground.call-site { background: #eceff3; }
     .CodeMirror-linebackground.current { background: #fff0a6; }
+    .CodeMirror-linebackground.current.jump-hover { background: #ffedb5; }
+    .CodeMirror-linebackground.call-site.jump-hover { background: #e5eaf0; }
     .source-line { display: grid; grid-template-columns: 3.25rem 1fr; min-height: 1.45em; }
     .source-line.call-site { background: #eceff3; }
     .source-line.current { background: #fff0a6; }
+    .source-line.current.jump-hover { background: #ffedb5; }
+    .source-line.call-site.jump-hover { background: #e5eaf0; }
+    .source-line.jump-hover { background: #f3f5f8; }
     .line-number { color: #7a808a; text-align: right; padding-right: .65rem; user-select: none; }
     .source-text { white-space: pre; }
+    #line-jump-controls {
+      position: absolute;
+      z-index: 5;
+      display: flex;
+      gap: .15rem;
+      transform: translateY(-50%);
+    }
+    #line-jump-controls[hidden] { display: none; }
+    #line-jump-controls button { padding: 0 .2rem; font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
     #controls { display: flex; align-items: center; gap: .45rem; flex: none; padding-top: .55rem; }
     button { padding: .35rem .7rem; }
     button:disabled { opacity: .5; }
@@ -80,6 +95,10 @@
       <div id="source" role="region" aria-label="Source code">
         <div id="source-fallback"></div>
         <textarea id="source-editor" aria-label="Source code editor"></textarea>
+        <div id="line-jump-controls" hidden>
+          <button id="jump-previous" type="button" aria-label="Jump to previous record on this line">&lt;-</button>
+          <button id="jump-next" type="button" aria-label="Jump to next record on this line">-&gt;</button>
+        </div>
       </div>
       <div id="controls">
         <button id="previous" type="button">Previous</button>
@@ -103,6 +122,16 @@
     const position = document.getElementById('position');
     const previousButton = document.getElementById('previous');
     const nextButton = document.getElementById('next');
+    const lineJumpControls = document.getElementById('line-jump-controls');
+    const jumpPreviousButton = document.getElementById('jump-previous');
+    const jumpNextButton = document.getElementById('jump-next');
+    const snapshotsByLine = new Map();
+    snapshots.forEach((snapshot, snapshotIndex) => {
+      if (!Number.isInteger(snapshot.lineno)) return;
+      if (!snapshotsByLine.has(snapshot.lineno)) snapshotsByLine.set(snapshot.lineno, []);
+      snapshotsByLine.get(snapshot.lineno).push(snapshotIndex);
+    });
+    let hoveredLine = null;
     let index = 0;
     let highlightedLine = null;
     let highlightedCallerLines = new Set();
@@ -164,6 +193,40 @@
         } else {
           document.getElementById(`source-line-${highlightedLine}`)?.scrollIntoView({ block: 'nearest' });
         }
+      }
+      if (hoveredLine !== null) setLineClass(hoveredLine, 'jump-hover', true);
+    }
+
+    function setHoveredLine(lineNumber, lineRect = null) {
+      if (!snapshotsByLine.has(lineNumber)) lineNumber = null;
+      if (hoveredLine !== null) setLineClass(hoveredLine, 'jump-hover', false);
+      hoveredLine = lineNumber;
+      if (hoveredLine === null) {
+        lineJumpControls.hidden = true;
+        return;
+      }
+
+      setLineClass(hoveredLine, 'jump-hover', true);
+      const history = snapshotsByLine.get(hoveredLine);
+      const previousIndex = [...history].reverse().find(snapshotIndex => snapshotIndex < index);
+      const nextIndex = history.find(snapshotIndex => snapshotIndex > index);
+      jumpPreviousButton.hidden = previousIndex === undefined;
+      jumpNextButton.hidden = nextIndex === undefined;
+      jumpPreviousButton.onclick = previousIndex === undefined ? null : () => {
+        index = previousIndex;
+        renderSnapshot();
+      };
+      jumpNextButton.onclick = nextIndex === undefined ? null : () => {
+        index = nextIndex;
+        renderSnapshot();
+      };
+      lineJumpControls.hidden = previousIndex === undefined && nextIndex === undefined;
+
+      if (!lineJumpControls.hidden && lineRect) {
+        const source = document.getElementById('source');
+        const sourceRect = source.getBoundingClientRect();
+        lineJumpControls.style.top = `${lineRect.top - sourceRect.top + source.scrollTop + (lineRect.bottom - lineRect.top) / 2}px`;
+        lineJumpControls.style.right = '.35rem';
       }
     }
 
@@ -315,11 +378,18 @@
       }
 
       updateSourceHighlights();
+      if (hoveredLine !== null) setHoveredLine(hoveredLine);
       renderCallStack(snapshot);
       position.textContent = `${index + 1} / ${snapshots.length}`;
       previousButton.disabled = index === 0;
       nextButton.disabled = index === snapshots.length - 1;
     }
+
+    sourceFallback.addEventListener('mouseover', event => {
+      const line = event.target.closest?.('.source-line');
+      if (line) setHoveredLine(Number(line.id.replace('source-line-', '')), line.getBoundingClientRect());
+    });
+    document.getElementById('source').addEventListener('mouseleave', () => setHoveredLine(null));
 
     previousButton.addEventListener('click', () => {
       if (index > 0) {
@@ -385,6 +455,26 @@
           theme: 'idea',
         });
         codeEditor.setSize('100%', '100%');
+        codeEditor.getWrapperElement().addEventListener('mousemove', event => {
+          const position = codeEditor.coordsChar(
+            { left: event.clientX, top: event.clientY },
+            'window'
+          );
+          const lineRect = codeEditor.charCoords(
+            { line: position.line, ch: 0 },
+            'window'
+          );
+          setHoveredLine(position.line + 1, lineRect);
+        });
+        codeEditor.on('scroll', () => {
+          if (hoveredLine !== null) {
+            const lineRect = codeEditor.charCoords(
+              { line: hoveredLine - 1, ch: 0 },
+              'window'
+            );
+            setHoveredLine(hoveredLine, lineRect);
+          }
+        });
         sourceFallback.hidden = true;
         updateSourceHighlights();
       } catch (error) {
