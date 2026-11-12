@@ -1,0 +1,21 @@
+name: Publish to PyPI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  publish:
+    uses: BYU-CS-Course-Ops/utils/.github/workflows/publish.yaml@main
+    with:
+      pypi_package: "tracecode"
+      publisher: "uv"
+      project_name: "tracecode"
+      version_source: "toml"
+      python_version: "3.12"
+      changelog_path: "CHANGELOG.md"
+    secrets:
+      pypi_token: ${{ secrets.PYPI_TOKEN }}
+      discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      discord_role: ${{ secrets.DISCORD_ROLE_ID }}
