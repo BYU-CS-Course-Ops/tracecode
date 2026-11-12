@@ -59,6 +59,7 @@
       z-index: 5;
       display: flex;
       gap: .15rem;
+      padding-right: 1rem;
       transform: translateY(-50%);
     }
     #line-jump-controls[hidden] { display: none; }
@@ -240,6 +241,14 @@
         lineJumpControls.style.top = `${lineRect.top - sourceRect.top + source.scrollTop + (lineRect.bottom - lineRect.top) / 2}px`;
         lineJumpControls.style.right = '.35rem';
       }
+    }
+
+    function positionLineJumpControls() {
+      if (hoveredLine === null || lineJumpControls.hidden) return;
+      const lineRect = codeEditor
+        ? codeEditor.charCoords({ line: hoveredLine - 1, ch: 0 }, 'window')
+        : document.getElementById(`source-line-${hoveredLine}`)?.getBoundingClientRect();
+      if (lineRect) setHoveredLine(hoveredLine, lineRect);
     }
 
     function formatInline(value) {
@@ -507,6 +516,7 @@
       position.textContent = `${index + 1} / ${snapshots.length}`;
       previousButton.disabled = index === 0;
       nextButton.disabled = index === snapshots.length - 1;
+      requestAnimationFrame(positionLineJumpControls);
     }
 
     sourceFallback.addEventListener('mouseover', event => {
@@ -514,6 +524,7 @@
       if (line) setHoveredLine(Number(line.id.replace('source-line-', '')), line.getBoundingClientRect());
     });
     document.getElementById('source').addEventListener('mouseleave', () => setHoveredLine(null));
+    document.getElementById('source').addEventListener('scroll', positionLineJumpControls);
 
     previousButton.addEventListener('click', () => {
       if (index > 0) {
@@ -595,15 +606,7 @@
           );
           setHoveredLine(position.line + 1, lineRect);
         });
-        codeEditor.on('scroll', () => {
-          if (hoveredLine !== null) {
-            const lineRect = codeEditor.charCoords(
-              { line: hoveredLine - 1, ch: 0 },
-              'window'
-            );
-            setHoveredLine(hoveredLine, lineRect);
-          }
-        });
+        codeEditor.on('scroll', positionLineJumpControls);
         sourceFallback.hidden = true;
         updateSourceHighlights();
       } catch (error) {

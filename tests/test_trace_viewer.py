@@ -37,6 +37,7 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert "Previous" in html and "Next" in html
     assert "textContent = line" in html
     assert 'id="source-fallback"' in html
+    assert "#line-jump-controls" in html and "padding-right: 1rem" in html
     assert "async function enableCodeMirror()" in html
     assert "codemirror/5.65.5" in html
     assert "readOnly: true" in html and "mode: 'python'" in html
@@ -64,6 +65,9 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert "codeEditor.on('mousemove'" not in html
     assert "if (event.key === 'ArrowLeft')" in html
     assert "if (event.key === 'ArrowRight')" in html
+    assert "function positionLineJumpControls()" in html
+    assert "requestAnimationFrame(positionLineJumpControls)" in html
+    assert "codeEditor.on('scroll', positionLineJumpControls)" in html
     assert "event.target.closest?.('.CodeMirror')" not in html
     assert "frame.call_return" in html and "return-notice" in html
     assert "frame.function_call" in html and "Calling function " in html
