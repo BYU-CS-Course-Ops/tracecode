@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import inspect
 import linecache
 import os
@@ -17,8 +18,55 @@ class RecordingLimitExceeded(RuntimeError):
     """Raised when a recording exceeds a configured snapshot or value limit."""
 
 
+class _TeeTextStream:
+    def __init__(self, stream, on_text: Callable[[str, str], None]):
+        self._stream = stream
+        self._on_text = on_text
+
+    def write(self, text: str):
+        written = self._stream.write(text)
+        self._on_text("stdout", text if written is None else text[:written])
+        return written
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+class _RecordingInputStream:
+    def __init__(self, stream, on_text: Callable[[str, str], None]):
+        self._stream = stream
+        self._on_text = on_text
+
+    def read(self, *args, **kwargs):
+        text = self._stream.read(*args, **kwargs)
+        self._on_text("stdin", text)
+        return text
+
+    def readline(self, *args, **kwargs):
+        text = self._stream.readline(*args, **kwargs)
+        self._on_text("stdin", text)
+        return text
+
+    def readlines(self, *args, **kwargs):
+        lines = self._stream.readlines(*args, **kwargs)
+        self._on_text("stdin", "".join(lines))
+        return lines
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = self.readline()
+        if not line:
+            raise StopIteration
+        return line
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
 class TraceRecorder:
-    """Record line, return, and exception snapshots for one Python source file."""
+    """Record execution snapshots and console deltas for one Python source file."""
 
     def __init__(
         self,
@@ -27,14 +75,16 @@ class TraceRecorder:
         max_snapshots: int = 10_000,
         max_depth: int = 20,
         max_items: int = 10_000,
+        max_console_chars: int = 1_000_000,
         target_file: str | None = None,
     ):
-        if max_snapshots < 1 or max_depth < 0 or max_items < 1:
-            raise ValueError("max_snapshots/max_items must be positive and max_depth non-negative")
+        if max_snapshots < 1 or max_depth < 0 or max_items < 1 or max_console_chars < 1:
+            raise ValueError("limits must be positive, except max_depth which may be zero")
         self._serializers = list(serializers or [])
         self._max_snapshots = max_snapshots
         self._max_depth = max_depth
         self._max_items = max_items
+        self._max_console_chars = max_console_chars
         self._target_file = os.path.realpath(target_file) if target_file else None
         self._previous_trace: Callable | None = None
         self._target_frame = None
@@ -44,6 +94,13 @@ class TraceRecorder:
         self._snapshot_count = 0
         self._source_lines: list[str] = []
         self._unwinding_frames: set[int] = set()
+        self._previous_stdout = None
+        self._previous_stdin = None
+        self._previous_input = None
+        self._input_call_active = False
+        self._console_parts: list[dict[str, str]] = []
+        self._console_chars = 0
+        self._console_truncated = False
 
     @property
     def recording(self) -> list[dict[str, Any]]:
@@ -71,10 +128,21 @@ class TraceRecorder:
         self._recording.clear()
         self._snapshot_count = 0
         self._unwinding_frames.clear()
+        self._console_parts.clear()
+        self._console_chars = 0
+        self._console_truncated = False
         self._recording.append(
             {"event": "source", "filename": self._target_file, "source": source}
         )
         self._previous_trace = sys.gettrace()
+        self._previous_stdout = sys.stdout
+        self._previous_stdin = sys.stdin
+        self._previous_input = builtins.input
+        if self._previous_stdout is not None:
+            sys.stdout = _TeeTextStream(self._previous_stdout, self._record_console)
+        if self._previous_stdin is not None:
+            sys.stdin = _RecordingInputStream(self._previous_stdin, self._record_console)
+        builtins.input = self._recording_input
         self._active = True
         sys.settrace(self._trace)
         if self._target_frame is not None:
@@ -92,11 +160,18 @@ class TraceRecorder:
         return False
 
     def _stop_tracing(self):
-        self._active = False
-        if self._target_frame is not None and self._target_frame.f_trace is self._trace:
-            self._target_frame.f_trace = self._previous_target_frame_trace
-        self._target_frame = None
-        self._previous_target_frame_trace = None
+        if self._active:
+            self._active = False
+            if self._target_frame is not None and self._target_frame.f_trace is self._trace:
+                self._target_frame.f_trace = self._previous_target_frame_trace
+            self._target_frame = None
+            self._previous_target_frame_trace = None
+            sys.stdout = self._previous_stdout
+            sys.stdin = self._previous_stdin
+            builtins.input = self._previous_input
+            self._previous_stdout = None
+            self._previous_stdin = None
+            self._previous_input = None
         sys.settrace(self._previous_trace)
 
     def _trace(self, frame, event: str, arg):
@@ -128,6 +203,40 @@ class TraceRecorder:
             raise
         return self._trace
 
+    def _recording_input(self, prompt: str = "") -> str:
+        self._input_call_active = True
+        try:
+            value = self._previous_input(prompt)
+        except BaseException:
+            self._input_call_active = False
+            if isinstance(prompt, str):
+                self._record_console("stdout", prompt)
+            raise
+        self._input_call_active = False
+        if isinstance(prompt, str):
+            self._record_console("stdout", prompt)
+        self._record_console("stdin", value + "\n")
+        return value
+
+    def _record_console(self, stream: str, text: str):
+        if self._input_call_active or not isinstance(text, str) or not text or self._console_truncated:
+            return
+        remaining = self._max_console_chars - self._console_chars
+        if remaining > 0:
+            text_to_keep = text[:remaining]
+            self._console_parts.append({"stream": stream, "text": text_to_keep})
+            self._console_chars += len(text_to_keep)
+        if len(text) > remaining:
+            self._console_parts.append(
+                {"stream": stream, "text": "\n[console capture truncated]\n"}
+            )
+            self._console_truncated = True
+
+    def _take_console_delta(self) -> list[dict[str, str]]:
+        chunks = self._console_parts
+        self._console_parts = []
+        return chunks
+
     def _record_snapshot(self, frame, event: str, arg):
         if self._snapshot_count >= self._max_snapshots:
             raise RecordingLimitExceeded(
@@ -138,6 +247,7 @@ class TraceRecorder:
 
     def _snapshot(self, frame, event: str, arg) -> dict[str, Any]:
         budget = [0]
+        console_delta = self._take_console_delta()
         snapshot: dict[str, Any] = {
             "event": event,
             "filename": frame.f_code.co_filename,
@@ -155,6 +265,8 @@ class TraceRecorder:
                 self._visible_values(frame.f_globals), budget
             )
         snapshot["callers"] = self._capture_callers(frame.f_back, budget)
+        if console_delta:
+            snapshot["console"] = console_delta
 
         if event == "return":
             snapshot["return"] = {"value": self._serialize(arg, 0, budget)}

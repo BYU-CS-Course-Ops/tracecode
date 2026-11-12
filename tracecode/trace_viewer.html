@@ -28,6 +28,7 @@
     }
     section { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
     h2 { flex: none; margin: 0 0 .4rem; font-size: 1rem; }
+    #console-heading { margin-top: .35rem; }
     #source, #frames {
       flex: 1;
       min-height: 0;
@@ -67,6 +68,8 @@
     button:disabled { opacity: .5; }
     #position { position: absolute; right: 0; font-variant-numeric: tabular-nums; }
     #frames { display: flex; flex-direction: column; gap: .45rem; padding: .4rem; box-sizing: border-box; }
+    #console-output { flex: 0 1 10rem; min-height: 4rem; overflow: auto; margin-bottom: .4rem; padding: .45rem .55rem; border: 1px solid #c8ccd3; border-radius: .35rem; background: white; color: #202124; white-space: pre-wrap; overflow-wrap: anywhere; font: 1rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #console-output .stdin { color: #305b91; background: #eef4fb; }
     .exception-notice { border-top: 1px solid #f0dddd; background: #fffafa; }
     .exception-summary { border-top: 1px solid #f0dddd; padding: .45rem .55rem; color: #8a1c1c; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; overflow-wrap: anywhere; }
     .traceback-title { padding: .35rem .55rem; font-weight: 600; }
@@ -74,6 +77,7 @@
     .traceback-location, .traceback-source { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
     .frame-card { flex: none; overflow: hidden; border: 1px solid #cbd2dc; border-radius: .3rem; background: white; }
     .frame-heading { padding: .4rem .55rem; background: #e9edf3; font-size: 1rem; font-weight: 500; overflow-wrap: anywhere; }
+    .current-frame .frame-heading { background: #fff0a6; }
     .frame-heading code { font-weight: 700; }
     .return-notice { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem; border-top: 1px solid #edf0f4; padding: .3rem .5rem; background: #f5f7fa; font-size: 1rem; }
     .variable-card { display: flex; align-items: baseline; gap: .55rem; border-top: 1px solid #edf0f4; padding: .25rem .5rem; }
@@ -114,6 +118,8 @@
     <section aria-label="Call stack and locals">
       <h2>Call stack</h2>
       <div id="frames" role="region" aria-label="Call frames"></div>
+      <h2 id="console-heading">Console</h2>
+      <div id="console-output" role="log" aria-label="Console transcript"></div>
     </section>
   </main>
   <script id="trace-data" type="application/json">__TRACE_RECORDING_JSON__</script>
@@ -124,6 +130,7 @@
     const sourceFallback = document.getElementById('source-fallback');
     const sourceEditorElement = document.getElementById('source-editor');
     const frames = document.getElementById('frames');
+    const consoleOutput = document.getElementById('console-output');
     const position = document.getElementById('position');
     const previousButton = document.getElementById('previous');
     const nextButton = document.getElementById('next');
@@ -264,7 +271,7 @@
       }
 
       const inline = formatInline(value);
-      if (inline.length <= 20) return inline;
+      if (inline.length <= 30) return inline;
 
       const indent = '  '.repeat(depth);
       const childIndent = '  '.repeat(depth + 1);
@@ -342,7 +349,7 @@
 
         const functionName = document.createElement('strong');
         functionName.textContent = returned.qualified_function;
-        notice.append(functionName, ' returned ');
+        notice.append(functionName, ' returning ');
 
         const returnType = document.createElement('span');
         returnType.textContent = displayTypeLabel(returned.value);
@@ -403,6 +410,31 @@
       }
       fragment.appendChild(renderFrame(snapshot, true));
       frames.appendChild(fragment);
+      frames.scrollTop = frames.scrollHeight;
+    }
+
+    function renderConsole() {
+      const chunks = [];
+      for (let snapshotIndex = 0; snapshotIndex <= index; snapshotIndex++) {
+        for (const chunk of snapshots[snapshotIndex].console || []) {
+          const previous = chunks[chunks.length - 1];
+          if (previous && previous.stream === chunk.stream) {
+            previous.text += chunk.text;
+          } else {
+            chunks.push({ stream: chunk.stream, text: chunk.text });
+          }
+        }
+      }
+
+      const fragment = document.createDocumentFragment();
+      for (const chunk of chunks) {
+        const span = document.createElement('span');
+        span.className = chunk.stream === 'stdin' ? 'stdin' : 'stdout';
+        span.textContent = chunk.text;
+        fragment.appendChild(span);
+      }
+      consoleOutput.replaceChildren(fragment);
+      consoleOutput.scrollTop = consoleOutput.scrollHeight;
     }
 
     function renderSnapshot() {
@@ -416,12 +448,14 @@
         position.textContent = '0 / 0';
         previousButton.disabled = true;
         nextButton.disabled = true;
+        consoleOutput.replaceChildren();
         return;
       }
 
       updateSourceHighlights();
       if (hoveredLine !== null) setHoveredLine(hoveredLine);
       renderCallStack(snapshot);
+      renderConsole();
       position.textContent = `${index + 1} / ${snapshots.length}`;
       previousButton.disabled = index === 0;
       nextButton.disabled = index === snapshots.length - 1;

@@ -44,8 +44,17 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert 'id="frames"' in html and "className = 'frame-card'" in html
     assert 'id="event-info"' not in html and "eventInfo" not in html
     assert '.frame-heading code { font-weight: 700; }' in html
+    assert '.current-frame .frame-heading { background: #fff0a6; }' in html
     assert "document.createElement('code')" in html
     assert "snapshot.callers" in html and "variable-card" in html
+    assert "frames.scrollTop = frames.scrollHeight" in html
+    assert 'id="console-output"' in html
+    assert "snapshots[snapshotIndex].console" in html
+    assert "chunk.stream === 'stdin' ? 'stdin' : 'stdout'" in html
+    assert "consoleOutput.scrollTop = consoleOutput.scrollHeight" in html
+    assert "background: white; color: #202124" in html
+    assert "font: 1rem/1.35 ui-monospace" in html
+    assert "#console-output .stdin { color: #305b91" in html
     assert "function renderException(exception)" in html
     assert "Traceback (most recent call last):" in html
     assert "exception.traceback" in html
@@ -57,12 +66,14 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert "if (event.key === 'ArrowRight')" in html
     assert "event.target.closest?.('.CodeMirror')" not in html
     assert "frame.call_return" in html and "return-notice" in html
+    assert "notice.append(functionName, ' returning ')" in html
+    assert "notice.append(functionName, ' returned ')" not in html
     assert html.index("card.appendChild(variable)") < html.index("card.appendChild(notice)")
     assert "displayType(value)" in html and "variable.append(label, type, renderedValue)" not in html
     assert "if (value.type !== 'opaque')" in html
     assert "typeName.split('.')" in html
     assert "value.type === 'opaque' ? '' : ':'" in html
-    assert "inline.length <= 20" in html
+    assert "inline.length <= 30" in html
     assert "font-size: 1rem; font-weight: 700" in html
     assert "background: #f5f7fa; font-size: 1rem" in html
     assert "font: 1rem ui-monospace" in html

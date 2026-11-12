@@ -1,3 +1,4 @@
+import io
 import sys
 
 import pytest
@@ -211,6 +212,71 @@ def test_records_exceptions_that_are_handled(tmp_path):
     assert [frame["function"] for frame in exception["traceback"]] == ["run"]
     assert exception["args"] == {"type": "tuple", "data": [{"type": "str", "data": "bad"}]}
     assert any(snapshot["event"] == "return" for snapshot in recording)
+
+
+def test_captures_stdout_and_echoed_stdin_as_console_deltas(tmp_path, monkeypatch, capsys):
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    name = input('Name? ')\n"
+        "    print(f'Hello {name}')\n",
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO("Ada\n"))
+    recorder = TraceRecorder(target_file=str(filename))
+
+    with recorder:
+        func()
+
+    chunks = [
+        chunk
+        for snapshot in recorder.recording
+        for chunk in snapshot.get("console", [])
+    ]
+    assert "".join(chunk["text"] for chunk in chunks) == "Name? Ada\nHello Ada\n"
+    assert [chunk["stream"] for chunk in chunks] == ["stdout", "stdin", "stdout", "stdout"]
+    assert capsys.readouterr().out == "Name? Hello Ada\n"
+
+
+def test_input_prompt_is_recorded_when_stdin_reaches_eof(tmp_path, monkeypatch):
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    input('Enter your name: ')\n",
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    recorder = TraceRecorder(target_file=str(filename))
+
+    with pytest.raises(EOFError):
+        with recorder:
+            func()
+
+    chunks = [
+        chunk
+        for snapshot in recorder.recording
+        for chunk in snapshot.get("console", [])
+    ]
+    assert chunks == [{"stream": "stdout", "text": "Enter your name: "}]
+
+
+def test_console_capture_respects_character_limit(tmp_path, capsys):
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    print('abcdef')\n",
+    )
+    recorder = TraceRecorder(target_file=str(filename), max_console_chars=3)
+
+    with recorder:
+        func()
+
+    chunks = [
+        chunk
+        for snapshot in recorder.recording
+        for chunk in snapshot.get("console", [])
+    ]
+    assert "".join(chunk["text"] for chunk in chunks) == "abc\n[console capture truncated]\n"
+    assert all(chunk["stream"] == "stdout" for chunk in chunks)
+    capsys.readouterr()
 
 
 def test_exception_traceback_grows_outward_as_exception_unwinds(tmp_path):
@@ -440,12 +506,16 @@ def test_serializer_error_propagates_and_restores_trace(tmp_path):
     func, filename = load_function(tmp_path, "def run(value):\n    return value\n")
     recorder = TraceRecorder([(Value, broken_serializer)], target_file=str(filename))
     previous_trace = sys.gettrace()
+    previous_stdout = sys.stdout
+    previous_stdin = sys.stdin
 
     with pytest.raises(LookupError, match="serializer failed"):
         with recorder:
             func(Value())
 
     assert sys.gettrace() is previous_trace
+    assert sys.stdout is previous_stdout
+    assert sys.stdin is previous_stdin
 
 
 def test_invalid_limits_are_rejected():
@@ -455,3 +525,5 @@ def test_invalid_limits_are_rejected():
         TraceRecorder(max_depth=-1)
     with pytest.raises(ValueError):
         TraceRecorder(max_items=0)
+    with pytest.raises(ValueError):
+        TraceRecorder(max_console_chars=0)
