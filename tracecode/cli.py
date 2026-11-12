@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import runpy
 import sys
 import traceback
+import types
 from pathlib import Path
 
 from .code_tracer import TraceRecorder
@@ -43,9 +43,18 @@ def main(argv: list[str] | None = None) -> int:
     sys.path.insert(0, str(script.parent))
     failure = None
     exit_code = 0
+    script_module = types.ModuleType("__main__")
+    script_module.__file__ = str(script)
+    script_module.__cached__ = None
+    script_module.__loader__ = None
+    script_module.__package__ = None
+    script_module.__spec__ = None
+    had_main_module = "__main__" in sys.modules
+    previous_main_module = sys.modules.get("__main__")
     try:
+        sys.modules["__main__"] = script_module
         with recorder:
-            runpy.run_path(str(script), run_name="__main__")
+            recorder.exec_source(script_module.__dict__)
     except SystemExit as error:
         if isinstance(error.code, int):
             exit_code = error.code
@@ -56,6 +65,10 @@ def main(argv: list[str] | None = None) -> int:
         failure = sys.exc_info()
         exit_code = 1
     finally:
+        if had_main_module:
+            sys.modules["__main__"] = previous_main_module
+        else:
+            sys.modules.pop("__main__", None)
         sys.argv = previous_argv
         sys.path[:] = previous_path
 

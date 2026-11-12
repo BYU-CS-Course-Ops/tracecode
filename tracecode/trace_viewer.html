@@ -346,6 +346,18 @@
         }
       }
 
+      if (frame.condition) {
+        const notice = document.createElement('div');
+        notice.className = 'return-notice';
+        notice.append('Condition ');
+        const conditionSource = document.createElement('code');
+        conditionSource.textContent = frame.condition.source;
+        const conditionResult = document.createElement('strong');
+        conditionResult.textContent = frame.condition.result.data ? 'True' : 'False';
+        notice.append(conditionSource, ' evaluated ', conditionResult);
+        card.appendChild(notice);
+      }
+
       if (frame.function_call) {
         const notice = document.createElement('div');
         notice.className = 'return-notice';

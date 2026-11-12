@@ -19,6 +19,34 @@ class RecordingLimitExceeded(RuntimeError):
     """Raised when a recording exceeds a configured snapshot or value limit."""
 
 
+class _ConditionInstrumenter(ast.NodeTransformer):
+    def __init__(self, helper_name: str, source: str):
+        self.helper_name = helper_name
+        self.source = source
+
+    def _wrap(self, test: ast.expr, kind: str) -> ast.expr:
+        call = ast.Call(
+            func=ast.Name(id=self.helper_name, ctx=ast.Load()),
+            args=[
+                test,
+                ast.Constant(kind),
+                ast.Constant(ast.get_source_segment(self.source, test) or ""),
+            ],
+            keywords=[],
+        )
+        return ast.copy_location(call, test)
+
+    def visit_If(self, node: ast.If):
+        self.generic_visit(node)
+        node.test = self._wrap(node.test, "if")
+        return node
+
+    def visit_While(self, node: ast.While):
+        self.generic_visit(node)
+        node.test = self._wrap(node.test, "while")
+        return node
+
+
 class _TeeTextStream:
     def __init__(self, stream, on_text: Callable[[str, str], None]):
         self._stream = stream
@@ -94,6 +122,8 @@ class TraceRecorder:
         self._recording: list[dict[str, Any]] = []
         self._snapshot_count = 0
         self._source_lines: list[str] = []
+        self._source = ""
+        self._condition_helper_name: str | None = None
         self._uses_sys_argv = False
         self._unwinding_frames: set[int] = set()
         self._previous_stdout = None
@@ -126,7 +156,9 @@ class TraceRecorder:
             self._previous_target_frame_trace = self._target_frame.f_trace
         with tokenize.open(self._target_file) as source_file:
             source = source_file.read()
+        self._source = source
         self._source_lines = source.splitlines()
+        self._condition_helper_name = None
         try:
             syntax_tree = ast.parse(source, filename=self._target_file)
         except SyntaxError:
@@ -162,6 +194,41 @@ class TraceRecorder:
         if self._target_frame is not None:
             self._target_frame.f_trace = self._trace
         return self
+
+    def exec_source(self, namespace: dict[str, Any]):
+        """Execute this recorder's source after instrumenting if/elif/while tests."""
+        if not self._active:
+            raise RuntimeError("TraceRecorder must be active to execute source")
+        syntax_tree = ast.parse(self._source, filename=self._target_file)
+        names = {
+            node.id
+            for node in ast.walk(syntax_tree)
+            if isinstance(node, ast.Name)
+        }
+        helper_name = "__tracecode_record_condition__"
+        while helper_name in names or helper_name in namespace:
+            helper_name += "_"
+        self._condition_helper_name = helper_name
+        namespace[helper_name] = self._record_condition
+        syntax_tree = _ConditionInstrumenter(helper_name, self._source).visit(syntax_tree)
+        ast.fix_missing_locations(syntax_tree)
+        code = compile(syntax_tree, self._target_file, "exec", dont_inherit=True)
+        exec(code, namespace)
+
+    def _record_condition(self, value: Any, kind: str, source: str) -> bool:
+        result = bool(value)
+        frame = inspect.currentframe().f_back
+        if (
+            self._active
+            and frame is not None
+            and os.path.realpath(frame.f_code.co_filename) == self._target_file
+        ):
+            self._record_snapshot(
+                frame,
+                "condition",
+                {"result": result, "kind": kind, "source": source},
+            )
+        return result
 
     def __exit__(
         self,
@@ -323,6 +390,12 @@ class TraceRecorder:
             }
         elif event == "input_prompt":
             snapshot["prompt"] = arg
+        elif event == "condition":
+            snapshot["condition"] = {
+                "result": self._serialize(arg["result"], 0, budget),
+                "kind": arg["kind"],
+                "source": arg["source"],
+            }
         elif event == "input_return":
             snapshot["input_return"] = {
                 "typed_text": arg + "\n",
@@ -396,12 +469,12 @@ class TraceRecorder:
     def _serialize_scope(self, values: dict[str, Any], budget: list[int]) -> dict[str, Any]:
         return {name: self._serialize(value, 0, budget) for name, value in values.items()}
 
-    @staticmethod
-    def _visible_values(values: dict[str, Any]) -> dict[str, Any]:
+    def _visible_values(self, values: dict[str, Any]) -> dict[str, Any]:
         return {
             name: value
             for name, value in values.items()
             if not (name.startswith("__") and name.endswith("__"))
+            and name != self._condition_helper_name
         }
 
     @staticmethod

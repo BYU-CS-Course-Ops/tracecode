@@ -64,6 +64,50 @@ def test_line_snapshots_capture_state_before_each_line(tmp_path):
     assert recording[-1]["return"] == {"value": {"type": "int", "data": 2}}
 
 
+def test_records_if_elif_and_each_while_condition_without_helper_frames(tmp_path):
+    source = (
+        "def run():\n"
+        "    value = 0\n"
+        "    while value < 2:\n"
+        "        if value == 0:\n"
+        "            value += 1\n"
+        "        elif value == 1:\n"
+        "            value += 1\n"
+        "    return value\n"
+        "run()\n"
+    )
+    filename = tmp_path / "conditions.py"
+    filename.write_text(source)
+    namespace = {"__name__": "__main__", "__file__": str(filename)}
+    recorder = TraceRecorder(target_file=str(filename))
+
+    with recorder:
+        recorder.exec_source(namespace)
+
+    conditions = [
+        snapshot for snapshot in recorder.recording if snapshot["event"] == "condition"
+    ]
+    assert [snapshot["condition"]["result"]["data"] for snapshot in conditions] == [
+        True, True, True, False, True, False
+    ]
+    assert [snapshot["condition"]["source"] for snapshot in conditions] == [
+        "value < 2", "value == 0", "value < 2", "value == 0", "value == 1", "value < 2"
+    ]
+    assert [snapshot["condition"]["kind"] for snapshot in conditions] == [
+        "while", "if", "while", "if", "if", "while"
+    ]
+    assert all(snapshot["function"] == "run" for snapshot in conditions)
+    assert all(
+        "tracecode_record_condition" not in repr(snapshot.get("globals", {}))
+        for snapshot in conditions
+    )
+    assert all(
+        caller["function"] != "_record_condition"
+        for snapshot in conditions
+        for caller in snapshot["callers"]
+    )
+
+
 def test_displays_sys_argv_as_a_module_local_when_source_uses_it(tmp_path, monkeypatch):
     source = "import sys\nargs = sys.argv\n"
     filename = tmp_path / "arguments.py"

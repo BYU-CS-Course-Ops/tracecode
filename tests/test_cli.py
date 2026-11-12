@@ -12,6 +12,8 @@ def test_cli_runs_script_with_arguments_and_writes_viewer(tmp_path, monkeypatch,
         "Path(__file__).with_suffix('.args').write_text(json.dumps(sys.argv[1:]))\n"
         "def run():\n"
         "    result = 42\n"
+        "    if result == 42:\n"
+        "        result = 42\n"
         "    return result\n"
         "run()\n"
     )
@@ -33,6 +35,16 @@ def test_cli_runs_script_with_arguments_and_writes_viewer(tmp_path, monkeypatch,
     )
     assert payload["filename"] == "script.py"
     assert any(snapshot["function"] == "run" for snapshot in payload["recording"])
+    condition = next(
+        snapshot["condition"]
+        for snapshot in payload["recording"]
+        if snapshot["event"] == "condition"
+    )
+    assert condition == {
+        "result": {"type": "bool", "data": True},
+        "kind": "if",
+        "source": "result == 42",
+    }
     assert str(script.with_suffix(".html")) in capsys.readouterr().out
 
 
