@@ -259,8 +259,6 @@ class TraceRecorder:
         if not self._active:
             return None
         try:
-            if os.path.realpath(frame.f_code.co_filename) != self._target_file:
-                return self._trace
             frame_id = id(frame)
             if event == "line":
                 self._unwinding_frames.discard(frame_id)
@@ -270,7 +268,32 @@ class TraceRecorder:
                 # The preceding exception snapshot already represents this frame's unwind.
                 self._unwinding_frames.discard(frame_id)
                 return self._trace
+
+            is_target_frame = os.path.realpath(frame.f_code.co_filename) == self._target_file
             caller = frame.f_back
+            if (
+                not is_target_frame
+                and event == "return"
+                and caller is not None
+                and os.path.realpath(caller.f_code.co_filename) == self._target_file
+                and not (
+                    frame.f_code.co_flags
+                    & (
+                        inspect.CO_GENERATOR
+                        | inspect.CO_COROUTINE
+                        | inspect.CO_ASYNC_GENERATOR
+                    )
+                )
+                and frame.f_code
+                not in (
+                    TraceRecorder._recording_input.__code__,
+                    TraceRecorder._record_condition.__code__,
+                    _TeeTextStream.write.__code__,
+                )
+            ):
+                self._record_snapshot(caller, "call_return", (frame, arg))
+            if not is_target_frame:
+                return self._trace
             # The line snapshot precedes expression evaluation; this call snapshot
             # follows argument evaluation. Keep both because arguments can have
             # side effects and one source line can contain nested or multiple calls.

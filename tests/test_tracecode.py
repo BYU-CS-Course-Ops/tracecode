@@ -106,6 +106,10 @@ def test_records_if_elif_and_each_while_condition_without_helper_frames(tmp_path
         for snapshot in conditions
         for caller in snapshot["callers"]
     )
+    assert not any(
+        snapshot.get("call_return", {}).get("function") == "_record_condition"
+        for snapshot in recorder.recording
+    )
 
 
 def test_displays_sys_argv_as_a_module_local_when_source_uses_it(tmp_path, monkeypatch):
@@ -247,6 +251,112 @@ def test_function_return_records_return_site_and_call_site(tmp_path):
     }
 
 
+def test_external_python_returns_are_recorded_at_the_target_boundary(tmp_path):
+    external_file = tmp_path / "external.py"
+    external_source = (
+        "def inner():\n"
+        "    return 3\n"
+        "def outer():\n"
+        "    value = inner()\n"
+        "    return value + 1\n"
+        "def direct():\n"
+        "    return 9\n"
+    )
+    external_file.write_text(external_source)
+    external_namespace = {}
+    exec(compile(external_source, str(external_file), "exec"), external_namespace)
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    first = outer(); second = direct()\n"
+        "    return first, second\n",
+        namespace=external_namespace,
+    )
+
+    result, recording = record_function(func, filename)
+
+    assert result == (4, 9)
+    returns = [snapshot for snapshot in recording if snapshot["event"] == "call_return"]
+    assert [(item["call_return"]["function"], item["call_return"]["value"]) for item in returns] == [
+        ("outer", {"type": "int", "data": 4}),
+        ("direct", {"type": "int", "data": 9}),
+    ]
+    assert all(item["function"] == "run" and item["lineno"] == 2 for item in returns)
+    assert all(item["filename"] == str(filename) for item in returns)
+    assert [item["call_return"]["qualified_function"] for item in returns] == [
+        "outer", "direct"
+    ]
+    assert "first" not in decode_mapping(returns[0]["locals"])
+    assert not any(
+        item["event"] == "call_return" and item["call_return"]["function"] == "inner"
+        for item in recording
+    )
+
+
+def test_external_return_captures_custom_serialized_caller_state(tmp_path):
+    class State:
+        def __init__(self):
+            self.value = 0
+
+    external_file = tmp_path / "external.py"
+    external_source = "def update(state):\n    state.value = 5\n    return state.value\n"
+    external_file.write_text(external_source)
+    external_namespace = {}
+    exec(compile(external_source, str(external_file), "exec"), external_namespace)
+    func, filename = load_function(
+        tmp_path,
+        "def run(state):\n    result = update(state)\n    return result\n",
+        namespace=external_namespace,
+    )
+    recorder = TraceRecorder(
+        [(State, lambda state: {"value": state.value})], target_file=str(filename)
+    )
+
+    with recorder:
+        func(State())
+
+    returned = next(item for item in recorder.recording if item["event"] == "call_return")
+    assert returned["call_return"]["value"] == {"type": "int", "data": 5}
+    assert decode_mapping(returned["locals"])["state"] == {"value": 5}
+
+
+def test_external_raises_generators_and_input_do_not_create_general_return_events(
+    tmp_path, monkeypatch
+):
+    external_file = tmp_path / "external.py"
+    external_source = (
+        "def fail():\n"
+        "    raise ValueError('failed')\n"
+        "def generate():\n"
+        "    yield 1\n"
+    )
+    external_file.write_text(external_source)
+    external_namespace = {}
+    exec(compile(external_source, str(external_file), "exec"), external_namespace)
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    try:\n"
+        "        fail()\n"
+        "    except ValueError:\n"
+        "        pass\n"
+        "    next(generate())\n"
+        "    input()\n",
+        namespace=external_namespace,
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO("answer\n"))
+    recorder = TraceRecorder(target_file=str(filename))
+
+    with recorder:
+        func()
+
+    returns = [item["call_return"]["function"] for item in recorder.recording if "call_return" in item]
+    assert returns == []
+    assert [item["event"] for item in recorder.recording if item["event"].startswith("input_")] == [
+        "input_prompt", "input_return"
+    ]
+
+
 def test_snapshots_capture_callers_oldest_first(tmp_path):
     func, filename = load_function(
         tmp_path,
@@ -352,6 +462,10 @@ def test_captures_stdout_and_echoed_stdin_as_console_deltas(tmp_path, monkeypatc
     }
     assert input_events[1]["console"] == [{"stream": "stdin", "text": "Ada\n"}]
     assert capsys.readouterr().out == "Name? Hello Ada\n"
+    assert not any(
+        snapshot.get("call_return", {}).get("function") == "write"
+        for snapshot in recorder.recording
+    )
 
 
 def test_input_prompt_is_recorded_when_stdin_reaches_eof(tmp_path, monkeypatch):
