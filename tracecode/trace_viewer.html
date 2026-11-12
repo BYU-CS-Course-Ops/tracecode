@@ -337,6 +337,26 @@
         }
       }
 
+      if (frame.function_call) {
+        const notice = document.createElement('div');
+        notice.className = 'return-notice';
+        notice.append('Calling function ');
+        const functionName = document.createElement('strong');
+        const functionCode = document.createElement('code');
+        functionCode.textContent = frame.function_call.qualified_function;
+        functionName.appendChild(functionCode);
+        notice.append(functionName, '(');
+        const argumentsList = Object.entries(frame.function_call.arguments || {});
+        argumentsList.forEach(([name, value], index) => {
+          if (index > 0) notice.append(', ');
+          const argument = document.createElement('code');
+          argument.textContent = `${name}=${formatValue(value)}`;
+          notice.appendChild(argument);
+        });
+        notice.append(')');
+        card.appendChild(notice);
+      }
+
       if (frame.input_return) {
         const typedNotice = document.createElement('div');
         typedNotice.className = 'return-notice';
@@ -349,8 +369,10 @@
         const inputReturnNotice = document.createElement('div');
         inputReturnNotice.className = 'return-notice';
         inputReturnNotice.append('Function ');
-        const inputFunction = document.createElement('code');
-        inputFunction.textContent = 'input';
+        const inputFunction = document.createElement('strong');
+        const inputFunctionCode = document.createElement('code');
+        inputFunctionCode.textContent = 'input';
+        inputFunction.appendChild(inputFunctionCode);
         inputReturnNotice.append(inputFunction, ' returned ');
         const inputType = document.createElement('span');
         inputType.textContent = displayTypeLabel(frame.input_return.value);
@@ -372,8 +394,10 @@
         notice.append('function ');
 
         const functionName = document.createElement('strong');
-        functionName.textContent = returned.qualified_function;
-        notice.append(functionName, ' returning ');
+        const functionCode = document.createElement('code');
+        functionCode.textContent = returned.qualified_function;
+        functionName.appendChild(functionCode);
+        notice.append(functionName, frame.call_return ? ' returned ' : ' returning ');
 
         const returnType = document.createElement('span');
         returnType.textContent = displayTypeLabel(returned.value);

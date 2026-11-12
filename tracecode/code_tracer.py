@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import builtins
 import inspect
 import linecache
@@ -93,6 +94,7 @@ class TraceRecorder:
         self._recording: list[dict[str, Any]] = []
         self._snapshot_count = 0
         self._source_lines: list[str] = []
+        self._uses_sys_argv = False
         self._unwinding_frames: set[int] = set()
         self._previous_stdout = None
         self._previous_stdin = None
@@ -125,6 +127,18 @@ class TraceRecorder:
         with tokenize.open(self._target_file) as source_file:
             source = source_file.read()
         self._source_lines = source.splitlines()
+        try:
+            syntax_tree = ast.parse(source, filename=self._target_file)
+        except SyntaxError:
+            self._uses_sys_argv = False
+        else:
+            self._uses_sys_argv = any(
+                isinstance(node, ast.Attribute)
+                and node.attr == "argv"
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "sys"
+                for node in ast.walk(syntax_tree)
+            )
         self._recording.clear()
         self._snapshot_count = 0
         self._unwinding_frames.clear()
@@ -189,9 +203,18 @@ class TraceRecorder:
                 # The preceding exception snapshot already represents this frame's unwind.
                 self._unwinding_frames.discard(frame_id)
                 return self._trace
-            if event in ("line", "return", "exception"):
+            caller = frame.f_back
+            # The line snapshot precedes expression evaluation; this call snapshot
+            # follows argument evaluation. Keep both because arguments can have
+            # side effects and one source line can contain nested or multiple calls.
+            if (
+                event == "call"
+                and caller is not None
+                and os.path.realpath(caller.f_code.co_filename) == self._target_file
+            ):
+                self._record_snapshot(caller, "call", frame)
+            elif event in ("line", "return", "exception"):
                 self._record_snapshot(frame, event, arg)
-                caller = frame.f_back
                 if (
                     event == "return"
                     and caller is not None
@@ -269,6 +292,8 @@ class TraceRecorder:
         local_values = self._visible_values(frame.f_locals)
         if frame.f_code.co_name == "<module>":
             # At module scope locals and globals are the same mapping.
+            if self._uses_sys_argv and frame.f_globals.get("sys") is sys:
+                local_values["sys.argv"] = sys.argv
             snapshot["locals"] = self._serialize_scope(local_values, budget)
         else:
             snapshot["locals"] = self._serialize_scope(local_values, budget)
@@ -302,6 +327,13 @@ class TraceRecorder:
             snapshot["input_return"] = {
                 "typed_text": arg + "\n",
                 "value": self._serialize(arg, 0, budget),
+            }
+        elif event == "call":
+            snapshot["function_call"] = {
+                "qualified_function": arg.f_code.co_qualname,
+                "arguments": self._serialize_scope(
+                    self._visible_values(arg.f_locals), budget
+                ),
             }
         return snapshot
 

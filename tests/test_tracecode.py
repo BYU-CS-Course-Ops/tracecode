@@ -64,6 +64,27 @@ def test_line_snapshots_capture_state_before_each_line(tmp_path):
     assert recording[-1]["return"] == {"value": {"type": "int", "data": 2}}
 
 
+def test_displays_sys_argv_as_a_module_local_when_source_uses_it(tmp_path, monkeypatch):
+    source = "import sys\nargs = sys.argv\n"
+    filename = tmp_path / "arguments.py"
+    filename.write_text(source)
+    monkeypatch.setattr(sys, "argv", [str(filename), "Gordon"])
+    recorder = TraceRecorder(target_file=str(filename))
+
+    with recorder:
+        exec(compile(source, str(filename), "exec"), {})
+
+    module_snapshots = [
+        snapshot
+        for snapshot in recorder.recording
+        if snapshot["event"] == "line" and snapshot["function"] == "<module>"
+    ]
+    assert "sys.argv" not in decode_mapping(module_snapshots[0]["locals"])
+    assert decode_mapping(module_snapshots[1]["locals"])["sys.argv"] == [
+        str(filename), "Gordon"
+    ]
+
+
 def test_serializes_json_primitives_with_type_and_data(tmp_path):
     func, filename = load_function(
         tmp_path,
@@ -139,20 +160,34 @@ def test_function_return_records_return_site_and_call_site(tmp_path):
     func, filename = load_function(
         tmp_path,
         "def caller():\n"
-        "    result = foo()\n"
+        "    result = foo(7)\n"
         "    return result\n"
-        "def foo():\n"
-        "    return 7\n",
+        "def foo(value):\n"
+        "    return value\n",
         name="caller",
     )
 
     _, recording = record_function(func, filename)
+
+    call_index = next(
+        index
+        for index, snapshot in enumerate(recording)
+        if snapshot.get("function_call", {}).get("qualified_function") == "foo"
+    )
+    call_site = recording[call_index]
+    assert call_site["event"] == "call"
+    assert call_site["function"] == "caller"
+    assert call_site["lineno"] == 2
+    assert call_site["function_call"]["arguments"] == {
+        "value": {"type": "int", "data": 7}
+    }
 
     return_index = next(
         index
         for index, snapshot in enumerate(recording)
         if snapshot["event"] == "return" and snapshot["function"] == "foo"
     )
+    assert call_index < return_index
     returned = recording[return_index]
     call_return = recording[return_index + 1]
 
