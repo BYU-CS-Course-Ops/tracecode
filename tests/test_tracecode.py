@@ -234,6 +234,18 @@ def test_captures_stdout_and_echoed_stdin_as_console_deltas(tmp_path, monkeypatc
     ]
     assert "".join(chunk["text"] for chunk in chunks) == "Name? Ada\nHello Ada\n"
     assert [chunk["stream"] for chunk in chunks] == ["stdout", "stdin", "stdout", "stdout"]
+    input_events = [
+        event for event in recorder.recording
+        if event["event"] in {"input_prompt", "input_return"}
+    ]
+    assert [event["event"] for event in input_events] == ["input_prompt", "input_return"]
+    assert input_events[0]["prompt"] == "Name? "
+    assert input_events[0]["console"] == [{"stream": "stdout", "text": "Name? "}]
+    assert input_events[1]["input_return"] == {
+        "typed_text": "Ada\n",
+        "value": {"type": "str", "data": "Ada"},
+    }
+    assert input_events[1]["console"] == [{"stream": "stdin", "text": "Ada\n"}]
     assert capsys.readouterr().out == "Name? Hello Ada\n"
 
 

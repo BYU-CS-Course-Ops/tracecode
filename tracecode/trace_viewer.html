@@ -337,6 +337,30 @@
         }
       }
 
+      if (frame.input_return) {
+        const typedNotice = document.createElement('div');
+        typedNotice.className = 'return-notice';
+        typedNotice.append('The user typed ');
+        const typedText = document.createElement('code');
+        typedText.textContent = JSON.stringify(frame.input_return.typed_text);
+        typedNotice.appendChild(typedText);
+        card.appendChild(typedNotice);
+
+        const inputReturnNotice = document.createElement('div');
+        inputReturnNotice.className = 'return-notice';
+        inputReturnNotice.append('Function ');
+        const inputFunction = document.createElement('code');
+        inputFunction.textContent = 'input';
+        inputReturnNotice.append(inputFunction, ' returned ');
+        const inputType = document.createElement('span');
+        inputType.textContent = displayTypeLabel(frame.input_return.value);
+        inputReturnNotice.append(inputType, ' ');
+        const inputValue = document.createElement('code');
+        inputValue.textContent = formatValue(frame.input_return.value);
+        inputReturnNotice.appendChild(inputValue);
+        card.appendChild(inputReturnNotice);
+      }
+
       const returned = frame.call_return || (
         frame.event === 'return' && frame.return
           ? { qualified_function: frame.qualified_function, value: frame.return.value }

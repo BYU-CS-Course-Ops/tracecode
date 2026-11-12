@@ -66,6 +66,9 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert "if (event.key === 'ArrowRight')" in html
     assert "event.target.closest?.('.CodeMirror')" not in html
     assert "frame.call_return" in html and "return-notice" in html
+    assert "frame.input_return.typed_text" in html
+    assert "The user typed " in html and "inputReturnNotice.append(inputFunction, ' returned ')" in html
+    assert html.index("card.appendChild(typedNotice)") < html.index("card.appendChild(inputReturnNotice)")
     assert "notice.append(functionName, ' returning ')" in html
     assert "notice.append(functionName, ' returned ')" not in html
     assert html.index("card.appendChild(variable)") < html.index("card.appendChild(notice)")

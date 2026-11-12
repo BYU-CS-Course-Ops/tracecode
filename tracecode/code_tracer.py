@@ -204,18 +204,29 @@ class TraceRecorder:
         return self._trace
 
     def _recording_input(self, prompt: str = "") -> str:
+        caller = inspect.currentframe().f_back
+        records_input = (
+            caller is not None
+            and os.path.realpath(caller.f_code.co_filename) == self._target_file
+        )
+        if isinstance(prompt, str):
+            self._record_console("stdout", prompt)
+            if records_input:
+                self._record_snapshot(caller, "input_prompt", prompt)
+
         self._input_call_active = True
         try:
             value = self._previous_input(prompt)
         except BaseException:
             self._input_call_active = False
-            if isinstance(prompt, str):
+            if not records_input and isinstance(prompt, str):
                 self._record_console("stdout", prompt)
             raise
         self._input_call_active = False
-        if isinstance(prompt, str):
-            self._record_console("stdout", prompt)
-        self._record_console("stdin", value + "\n")
+        if isinstance(value, str):
+            self._record_console("stdin", value + "\n")
+            if records_input:
+                self._record_snapshot(caller, "input_return", value)
         return value
 
     def _record_console(self, stream: str, text: str):
@@ -284,6 +295,13 @@ class TraceRecorder:
                 "function": returned_frame.f_code.co_name,
                 "qualified_function": returned_frame.f_code.co_qualname,
                 "value": self._serialize(value, 0, budget),
+            }
+        elif event == "input_prompt":
+            snapshot["prompt"] = arg
+        elif event == "input_return":
+            snapshot["input_return"] = {
+                "typed_text": arg + "\n",
+                "value": self._serialize(arg, 0, budget),
             }
         return snapshot
 
