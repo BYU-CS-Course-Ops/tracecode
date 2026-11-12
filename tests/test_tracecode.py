@@ -293,6 +293,32 @@ def test_records_exceptions_that_are_handled(tmp_path):
     assert any(snapshot["event"] == "return" for snapshot in recording)
 
 
+def test_exception_locals_include_type_and_message(tmp_path):
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    try:\n"
+        "        raise ValueError('bad value')\n"
+        "    except ValueError as error:\n"
+        "        return error\n",
+    )
+
+    _, recording = record_function(func, filename)
+
+    return_line = next(
+        snapshot
+        for snapshot in recording
+        if snapshot["event"] == "line" and snapshot["lineno"] == 5
+    )
+    assert return_line["locals"]["error"] == {
+        "type": "opaque",
+        "data": {
+            "python_type": "ValueError",
+            "exception_message": "bad value",
+        },
+    }
+
+
 def test_captures_stdout_and_echoed_stdin_as_console_deltas(tmp_path, monkeypatch, capsys):
     func, filename = load_function(
         tmp_path,

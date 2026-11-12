@@ -501,6 +501,15 @@ class TraceRecorder:
                 data = self._serialize(serializer(value), depth + 1, budget)
                 return {"type": type_name, "data": data}
 
+        if isinstance(value, BaseException):
+            return {
+                "type": "opaque",
+                "data": {
+                    "python_type": type_name,
+                    "exception_message": self._exception_message(value),
+                },
+            }
+
         if value is None:
             return {"type": "NoneType", "data": None}
         if type(value) in (bool, int, float, str):

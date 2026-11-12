@@ -300,8 +300,12 @@
       return parts[parts.length - 1] || typeName;
     }
 
+    function hasExceptionMessage(value) {
+      return value.type === 'opaque' && typeof value.data.exception_message === 'string';
+    }
+
     function displayTypeLabel(value) {
-      return `(${displayType(value)})${value.type === 'opaque' ? '' : ':'}`;
+      return `(${displayType(value)})${value.type === 'opaque' && !hasExceptionMessage(value) ? '' : ':'}`;
     }
 
     function renderFrame(frame, isCurrent = false) {
@@ -336,10 +340,12 @@
           type.textContent = displayTypeLabel(value);
 
           variable.append(label, type);
-          if (value.type !== 'opaque') {
+          if (value.type !== 'opaque' || hasExceptionMessage(value)) {
             const renderedValue = document.createElement('pre');
             renderedValue.className = 'variable-value';
-            renderedValue.textContent = formatValue(value);
+            renderedValue.textContent = hasExceptionMessage(value)
+              ? value.data.exception_message
+              : formatValue(value);
             variable.appendChild(renderedValue);
           }
           card.appendChild(variable);
