@@ -1,7 +1,7 @@
 """Demonstrate changing values across function calls and returns.
 
 Run from the project root with:
-    tracecode --auto-open demos/state_and_calls.py
+    tracecode --auto-open docs/demos/state_and_calls.py
 """
 
 

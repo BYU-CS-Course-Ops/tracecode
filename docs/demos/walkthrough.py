@@ -1,7 +1,7 @@
 """Combine state, calls, conditions, loops, console I/O, and exceptions.
 
 Run from the project root with:
-    printf '3\n90\n70\n50\nnot-a-number\n' | tracecode --auto-open demos/walkthrough.py
+    printf '3\n90\n70\n50\nnot-a-number\n' | tracecode --auto-open docs/demos/walkthrough.py
 """
 
 

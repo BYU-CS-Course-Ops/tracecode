@@ -1,7 +1,7 @@
 """Demonstrate a traceback as an exception unwinds and is caught.
 
 Run from the project root with:
-    printf 'not-a-number\n' | tracecode --auto-open demos/exceptions.py
+    printf 'not-a-number\n' | tracecode --auto-open docs/demos/exceptions.py
 """
 
 

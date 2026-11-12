@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trace recording</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; line-height: 1.4; }
+    html, body { height: 100%; }
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      margin: 0;
+      overflow: hidden;
+      color: #202124;
+      background: #f7f8fa;
+    }
+    header { flex: none; padding: .65rem 1rem; background: #202a44; color: white; }
+    h1 { margin: 0; font-size: 1.15rem; }
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: .75rem;
+      flex: 1;
+      min-height: 0;
+      padding: .75rem;
+    }
+    section { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    h2 { flex: none; margin: 0 0 .4rem; font-size: 1rem; }
+    #console-heading { margin-top: .35rem; }
+    #source, #frames {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid #c8ccd3;
+      border-radius: .35rem;
+      background: white;
+    }
+    #source { position: relative; padding: 0; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .CodeMirror-linebackground.jump-hover { background: #f3f5f8; }
+    #source-fallback { min-height: 100%; padding: .4rem 0; box-sizing: border-box; }
+    #source-editor { display: none; }
+    .CodeMirror { height: 100%; width: 100%; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .CodeMirror-linebackground.call-site { background: #eceff3; }
+    .CodeMirror-linebackground.current { background: #fff0a6; }
+    .CodeMirror-linebackground.current.jump-hover { background: #ffedb5; }
+    .CodeMirror-linebackground.call-site.jump-hover { background: #e5eaf0; }
+    .source-line { display: grid; grid-template-columns: 3.25rem 1fr; min-height: 1.45em; }
+    .source-line.call-site { background: #eceff3; }
+    .source-line.current { background: #fff0a6; }
+    .source-line.current.jump-hover { background: #ffedb5; }
+    .source-line.call-site.jump-hover { background: #e5eaf0; }
+    .source-line.jump-hover { background: #f3f5f8; }
+    .line-number { color: #7a808a; text-align: right; padding-right: .65rem; user-select: none; }
+    .source-text { white-space: pre; }
+    #line-jump-controls {
+      position: absolute;
+      z-index: 5;
+      display: flex;
+      gap: .15rem;
+      padding-right: 1rem;
+      transform: translateY(-50%);
+    }
+    #line-jump-controls[hidden] { display: none; }
+    #line-jump-controls button { padding: 0 .2rem; font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #controls { position: relative; display: flex; justify-content: center; align-items: center; gap: .45rem; flex: none; padding-top: .55rem; }
+    button { padding: .35rem .7rem; }
+    button:disabled { opacity: .5; }
+    #position { position: absolute; right: 0; font-variant-numeric: tabular-nums; }
+    #frames { display: flex; flex-direction: column; gap: .45rem; padding: .4rem; box-sizing: border-box; }
+    #console-output { flex: 0 1 10rem; min-height: 4rem; overflow: auto; margin-bottom: .4rem; padding: .45rem .55rem; border: 1px solid #c8ccd3; border-radius: .35rem; background: white; color: #202124; white-space: pre-wrap; overflow-wrap: anywhere; font: 1rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #console-output .stdin { color: #305b91; background: #eef4fb; }
+    .exception-notice { border-top: 1px solid #f0dddd; background: #fffafa; }
+    .exception-summary { border-top: 1px solid #f0dddd; padding: .45rem .55rem; color: #8a1c1c; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; overflow-wrap: anywhere; }
+    .traceback-title { padding: .35rem .55rem; font-weight: 600; }
+    .traceback-frame { padding: 0 .55rem .45rem; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .traceback-location, .traceback-source { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+    .frame-card { flex: none; overflow: hidden; border: 1px solid #cbd2dc; border-radius: .3rem; background: white; }
+    .frame-heading { padding: .4rem .55rem; background: #e9edf3; font-size: 1rem; font-weight: 500; overflow-wrap: anywhere; }
+    .current-frame .frame-heading { background: #fff0a6; }
+    .frame-heading code { font-weight: 700; }
+    .return-notice { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem; border-top: 1px solid #edf0f4; padding: .3rem .5rem; background: #f5f7fa; font-size: 1rem; }
+    .variable-card { display: flex; align-items: baseline; gap: .55rem; border-top: 1px solid #edf0f4; padding: .25rem .5rem; }
+    .variable-name { flex: none; min-width: 0; font-size: 1rem; font-weight: 700; overflow-wrap: anywhere; }
+    .variable-type { flex: none; color: #626a76; font: 1rem ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .variable-value { flex: 1; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 1rem/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .empty-state { padding: .5rem; color: #666; font-style: italic; }
+    @media (max-width: 760px) {
+      body { height: auto; min-height: 100%; overflow: auto; }
+      main {
+        flex: none;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(15rem, 45vh) minmax(15rem, 45vh);
+        min-height: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header><h1 id="title">Trace recording</h1></header>
+  <main>
+    <section aria-label="Original source code">
+      <h2>Source</h2>
+      <div id="source" role="region" aria-label="Source code">
+        <div id="source-fallback"></div>
+        <textarea id="source-editor" aria-label="Source code editor"></textarea>
+        <div id="line-jump-controls" hidden>
+          <button id="jump-previous" type="button" aria-label="Jump to previous record on this line">&lt;-</button>
+          <button id="jump-next" type="button" aria-label="Jump to next record on this line">-&gt;</button>
+        </div>
+      </div>
+      <div id="controls">
+        <button id="previous" type="button">Previous</button>
+        <button id="next" type="button">Next</button>
+        <span id="position" aria-live="polite"></span>
+      </div>
+    </section>
+    <section aria-label="Call stack and locals">
+      <h2>Call stack</h2>
+      <div id="frames" role="region" aria-label="Call frames"></div>
+      <h2 id="console-heading">Console</h2>
+      <div id="console-output" role="log" aria-label="Console transcript"></div>
+    </section>
+  </main>
+  <script id="trace-data" type="application/json">{"filename": "exceptions.py", "source": "\"\"\"Demonstrate a traceback as an exception unwinds and is caught.\n\nRun from the project root with:\n    printf 'not-a-number\\n' | tracecode --auto-open docs/demos/exceptions.py\n\"\"\"\n\n\ndef parse_count(text):\n    return int(text)\n\n\ndef read_count():\n    text = input(\"Enter a whole number: \")\n    return parse_count(text)\n\n\ndef main():\n    try:\n        count = read_count()\n        print(f\"You entered {count}.\")\n    except ValueError as error:\n        print(f\"Could not read that number: {error}\")\n\n\nif __name__ == \"__main__\":\n    main()\n", "recording": [{"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 1, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {}, "callers": []}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 8, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {}, "callers": []}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 12, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 17, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 25, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "condition", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 25, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "condition": {"result": {"type": "bool", "data": true}, "kind": "if", "source": "__name__ == \"__main__\""}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 26, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "call", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 26, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "function_call": {"qualified_function": "main", "arguments": {}}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 18, "function": "main", "qualified_function": "main", "locals": {}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 19, "function": "main", "qualified_function": "main", "locals": {}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "call", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 19, "function": "main", "qualified_function": "main", "locals": {}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "function_call": {"qualified_function": "read_count", "arguments": {}}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 13, "function": "read_count", "qualified_function": "read_count", "locals": {}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [{"function": "main", "qualified_function": "main", "lineno": 19, "locals": {}}]}, {"event": "input_prompt", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 13, "function": "read_count", "qualified_function": "read_count", "locals": {}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [{"function": "main", "qualified_function": "main", "lineno": 19, "locals": {}}], "console": [{"stream": "stdout", "text": "Enter a whole number: "}], "prompt": "Enter a whole number: "}, {"event": "input_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 13, "function": "read_count", "qualified_function": "read_count", "locals": {}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [{"function": "main", "qualified_function": "main", "lineno": 19, "locals": {}}], "console": [{"stream": "stdin", "text": "not-a-number\n"}], "input_return": {"typed_text": "not-a-number\n", "value": {"type": "str", "data": "not-a-number"}}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 14, "function": "read_count", "qualified_function": "read_count", "locals": {"text": {"type": "str", "data": "not-a-number"}}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [{"function": "main", "qualified_function": "main", "lineno": 19, "locals": {}}]}, {"event": "call", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 14, "function": "read_count", "qualified_function": "read_count", "locals": {"text": {"type": "str", "data": "not-a-number"}}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [{"function": "main", "qualified_function": "main", "lineno": 19, "locals": {}}], "function_call": {"qualified_function": "parse_count", "arguments": {"text": {"type": "str", "data": "not-a-number"}}}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 9, "function": "parse_count", "qualified_function": "parse_count", "locals": {"text": {"type": "str", "data": "not-a-number"}}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [{"function": "main", "qualified_function": "main", "lineno": 19, "locals": {}}, {"function": "read_count", "qualified_function": "read_count", "lineno": 14, "locals": {"text": {"type": "str", "data": "not-a-number"}}}]}, {"event": "exception", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 9, "function": "parse_count", "qualified_function": "parse_count", "locals": {"text": {"type": "str", "data": "not-a-number"}}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [{"function": "main", "qualified_function": "main", "lineno": 19, "locals": {}}, {"function": "read_count", "qualified_function": "read_count", "lineno": 14, "locals": {"text": {"type": "str", "data": "not-a-number"}}}], "exception": {"type": "ValueError", "message": "invalid literal for int() with base 10: 'not-a-number'", "args": {"type": "tuple", "data": [{"type": "str", "data": "invalid literal for int() with base 10: 'not-a-number'"}]}, "traceback": [{"filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 9, "function": "parse_count", "qualified_function": "parse_count", "source": "    return int(text)"}]}}, {"event": "exception", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 14, "function": "read_count", "qualified_function": "read_count", "locals": {"text": {"type": "str", "data": "not-a-number"}}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [{"function": "main", "qualified_function": "main", "lineno": 19, "locals": {}}], "exception": {"type": "ValueError", "message": "invalid literal for int() with base 10: 'not-a-number'", "args": {"type": "tuple", "data": [{"type": "str", "data": "invalid literal for int() with base 10: 'not-a-number'"}]}, "traceback": [{"filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 14, "function": "read_count", "qualified_function": "read_count", "source": "    return parse_count(text)"}, {"filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 9, "function": "parse_count", "qualified_function": "parse_count", "source": "    return int(text)"}]}}, {"event": "exception", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 19, "function": "main", "qualified_function": "main", "locals": {}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "exception": {"type": "ValueError", "message": "invalid literal for int() with base 10: 'not-a-number'", "args": {"type": "tuple", "data": [{"type": "str", "data": "invalid literal for int() with base 10: 'not-a-number'"}]}, "traceback": [{"filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 19, "function": "main", "qualified_function": "main", "source": "        count = read_count()"}, {"filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 14, "function": "read_count", "qualified_function": "read_count", "source": "    return parse_count(text)"}, {"filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 9, "function": "parse_count", "qualified_function": "parse_count", "source": "    return int(text)"}]}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 21, "function": "main", "qualified_function": "main", "locals": {}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 22, "function": "main", "qualified_function": "main", "locals": {"error": {"type": "opaque", "data": {"python_type": "ValueError", "exception_message": "invalid literal for int() with base 10: 'not-a-number'"}}}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "return", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 22, "function": "main", "qualified_function": "main", "locals": {}, "globals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "console": [{"stream": "stdout", "text": "Could not read that number: invalid literal for int() with base 10: 'not-a-number'"}, {"stream": "stdout", "text": "\n"}], "return": {"value": {"type": "NoneType", "data": null}}}, {"event": "call_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 26, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "call_return": {"function": "main", "qualified_function": "main", "value": {"type": "NoneType", "data": null}}}, {"event": "return", "filename": "/Users/gbean/projects/tracecode/docs/demos/exceptions.py", "lineno": 26, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"parse_count": {"type": "opaque", "data": {"python_type": "function"}}, "read_count": {"type": "opaque", "data": {"python_type": "function"}}, "main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "return": {"value": {"type": "NoneType", "data": null}}}]}</script>
+  <script>
+    const recordingData = JSON.parse(document.getElementById('trace-data').textContent);
+    const sourceLines = recordingData.source.split(/\r\n|\n|\r/);
+    const snapshots = recordingData.recording;
+    const sourceFallback = document.getElementById('source-fallback');
+    const sourceEditorElement = document.getElementById('source-editor');
+    const frames = document.getElementById('frames');
+    const consoleOutput = document.getElementById('console-output');
+    const position = document.getElementById('position');
+    const previousButton = document.getElementById('previous');
+    const nextButton = document.getElementById('next');
+    const lineJumpControls = document.getElementById('line-jump-controls');
+    const jumpPreviousButton = document.getElementById('jump-previous');
+    const jumpNextButton = document.getElementById('jump-next');
+    const snapshotsByLine = new Map();
+    snapshots.forEach((snapshot, snapshotIndex) => {
+      if (!Number.isInteger(snapshot.lineno)) return;
+      if (!snapshotsByLine.has(snapshot.lineno)) snapshotsByLine.set(snapshot.lineno, []);
+      snapshotsByLine.get(snapshot.lineno).push(snapshotIndex);
+    });
+    let hoveredLine = null;
+    let index = 0;
+    let highlightedLine = null;
+    let highlightedCallerLines = new Set();
+    let codeEditor = null;
+
+    function renderSource() {
+      const fragment = document.createDocumentFragment();
+      sourceLines.forEach((line, index) => {
+        const row = document.createElement('div');
+        row.className = 'source-line';
+        row.id = `source-line-${index + 1}`;
+
+        const lineNumber = document.createElement('span');
+        lineNumber.className = 'line-number';
+        lineNumber.textContent = String(index + 1);
+
+        const text = document.createElement('code');
+        text.className = 'source-text';
+        text.textContent = line || ' ';
+
+        row.append(lineNumber, text);
+        fragment.appendChild(row);
+      });
+      sourceFallback.replaceChildren(fragment);
+    }
+
+    function setLineClass(lineNumber, className, enabled) {
+      if (!Number.isInteger(lineNumber) || lineNumber < 1) return;
+      if (codeEditor) {
+        if (lineNumber > codeEditor.lineCount()) return;
+        const method = enabled ? 'addLineClass' : 'removeLineClass';
+        codeEditor[method](lineNumber - 1, 'background', className);
+        return;
+      }
+      document.getElementById(`source-line-${lineNumber}`)?.classList.toggle(className, enabled);
+    }
+
+    function updateSourceHighlights() {
+      if (highlightedLine !== null) setLineClass(highlightedLine, 'current', false);
+      for (const lineNumber of highlightedCallerLines) {
+        setLineClass(lineNumber, 'call-site', false);
+      }
+
+      const snapshot = snapshots[index];
+      if (!snapshot) return;
+      highlightedCallerLines = new Set(
+        (snapshot.callers || [])
+          .map(caller => caller.lineno)
+          .filter(Number.isInteger)
+      );
+      for (const lineNumber of highlightedCallerLines) {
+        setLineClass(lineNumber, 'call-site', true);
+      }
+      highlightedLine = Number.isInteger(snapshot.lineno) ? snapshot.lineno : null;
+      if (highlightedLine !== null) {
+        setLineClass(highlightedLine, 'current', true);
+        if (codeEditor && highlightedLine <= codeEditor.lineCount()) {
+          codeEditor.scrollIntoView({ line: highlightedLine - 1, ch: 0 }, 100);
+        } else {
+          document.getElementById(`source-line-${highlightedLine}`)?.scrollIntoView({ block: 'nearest' });
+        }
+      }
+      if (hoveredLine !== null) setLineClass(hoveredLine, 'jump-hover', true);
+    }
+
+    function setHoveredLine(lineNumber, lineRect = null) {
+      if (!snapshotsByLine.has(lineNumber)) lineNumber = null;
+      if (hoveredLine !== null) setLineClass(hoveredLine, 'jump-hover', false);
+      hoveredLine = lineNumber;
+      if (hoveredLine === null) {
+        lineJumpControls.hidden = true;
+        return;
+      }
+
+      setLineClass(hoveredLine, 'jump-hover', true);
+      const history = snapshotsByLine.get(hoveredLine);
+      const previousIndex = [...history].reverse().find(snapshotIndex => snapshotIndex < index);
+      const nextIndex = history.find(snapshotIndex => snapshotIndex > index);
+      jumpPreviousButton.hidden = previousIndex === undefined;
+      jumpNextButton.hidden = nextIndex === undefined;
+      jumpPreviousButton.onclick = previousIndex === undefined ? null : () => {
+        index = previousIndex;
+        renderSnapshot();
+      };
+      jumpNextButton.onclick = nextIndex === undefined ? null : () => {
+        index = nextIndex;
+        renderSnapshot();
+      };
+      lineJumpControls.hidden = previousIndex === undefined && nextIndex === undefined;
+
+      if (!lineJumpControls.hidden && lineRect) {
+        const source = document.getElementById('source');
+        const sourceRect = source.getBoundingClientRect();
+        lineJumpControls.style.top = `${lineRect.top - sourceRect.top + source.scrollTop + (lineRect.bottom - lineRect.top) / 2}px`;
+        lineJumpControls.style.right = '.35rem';
+      }
+    }
+
+    function positionLineJumpControls() {
+      if (hoveredLine === null || lineJumpControls.hidden) return;
+      const lineRect = codeEditor
+        ? codeEditor.charCoords({ line: hoveredLine - 1, ch: 0 }, 'window')
+        : document.getElementById(`source-line-${hoveredLine}`)?.getBoundingClientRect();
+      if (lineRect) setHoveredLine(hoveredLine, lineRect);
+    }
+
+    function formatInline(value) {
+      const { type, data } = value;
+      if (type === 'NoneType') return 'None';
+      if (type === 'bool') return data ? 'True' : 'False';
+      if (type === 'str') return JSON.stringify(data);
+      if (type === 'int' || type === 'float') return String(data);
+      if (type === 'opaque') return `<opaque ${data.python_type}>`;
+      if (type === 'list') return `[${data.map(formatInline).join(', ')}]`;
+      if (type === 'tuple') return `(${data.map(formatInline).join(', ')}${data.length === 1 ? ',' : ''})`;
+      if (type === 'dict') {
+        return `{${data.map(([key, item]) => `${formatInline(key)}: ${formatInline(item)}`).join(', ')}}`;
+      }
+      return `${type}(${formatInline(data)})`;
+    }
+
+    function indentLines(text, prefix) {
+      return `${prefix}${text.replace(/\n/g, `\n${prefix}`)}`;
+    }
+
+    function formatValue(value, depth = 0) {
+      const { type, data } = value;
+      if (type !== 'list' && type !== 'dict') {
+        if (!['tuple', 'NoneType', 'bool', 'int', 'float', 'str', 'opaque'].includes(type)) {
+          return `${type}(${formatValue(data, depth)})`;
+        }
+        return formatInline(value);
+      }
+
+      const inline = formatInline(value);
+      if (inline.length <= 30) return inline;
+
+      const indent = '  '.repeat(depth);
+      const childIndent = '  '.repeat(depth + 1);
+      if (type === 'list') {
+        const items = data.map(item => indentLines(formatValue(item, depth + 1), childIndent));
+        return `[\n${items.join(',\n')}\n${indent}]`;
+      }
+      const entries = data.map(([key, item]) =>
+        `${childIndent}${formatInline(key)}: ${indentLines(formatValue(item, depth + 1), `${childIndent}  `)}`
+      );
+      return `{\n${entries.join(',\n')}\n${indent}}`;
+    }
+
+    function displayType(value) {
+      const typeName = value.type === 'opaque' ? value.data.python_type : value.type;
+      const parts = typeName.split('.').filter(part => part && part !== '<locals>');
+      return parts[parts.length - 1] || typeName;
+    }
+
+    function hasExceptionMessage(value) {
+      return value.type === 'opaque' && typeof value.data.exception_message === 'string';
+    }
+
+    function displayTypeLabel(value) {
+      return `(${displayType(value)})${value.type === 'opaque' && !hasExceptionMessage(value) ? '' : ':'}`;
+    }
+
+    function renderFrame(frame, isCurrent = false) {
+      const card = document.createElement('article');
+      card.className = 'frame-card';
+      if (isCurrent) card.classList.add('current-frame');
+
+      const heading = document.createElement('div');
+      heading.className = 'frame-heading';
+      const functionName = document.createElement('code');
+      functionName.textContent = frame.qualified_function;
+      heading.append(functionName, ` · line ${frame.lineno}`);
+      card.appendChild(heading);
+
+      const entries = Object.entries(frame.locals || {});
+      if (entries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No local variables.';
+        card.appendChild(empty);
+      } else {
+        for (const [name, value] of entries) {
+          const variable = document.createElement('div');
+          variable.className = 'variable-card';
+
+          const label = document.createElement('strong');
+          label.className = 'variable-name';
+          label.textContent = name;
+
+          const type = document.createElement('span');
+          type.className = 'variable-type';
+          type.textContent = displayTypeLabel(value);
+
+          variable.append(label, type);
+          if (value.type !== 'opaque' || hasExceptionMessage(value)) {
+            const renderedValue = document.createElement('pre');
+            renderedValue.className = 'variable-value';
+            renderedValue.textContent = hasExceptionMessage(value)
+              ? value.data.exception_message
+              : formatValue(value);
+            variable.appendChild(renderedValue);
+          }
+          card.appendChild(variable);
+        }
+      }
+
+      if (frame.condition) {
+        const notice = document.createElement('div');
+        notice.className = 'return-notice';
+        notice.append('Condition ');
+        const conditionSource = document.createElement('code');
+        conditionSource.textContent = frame.condition.source;
+        const conditionResult = document.createElement('strong');
+        conditionResult.textContent = frame.condition.result.data ? 'True' : 'False';
+        notice.append(conditionSource, ' evaluated ', conditionResult);
+        card.appendChild(notice);
+      }
+
+      if (frame.function_call) {
+        const notice = document.createElement('div');
+        notice.className = 'return-notice';
+        notice.append('Calling function ');
+        const functionName = document.createElement('strong');
+        const functionCode = document.createElement('code');
+        functionCode.textContent = frame.function_call.qualified_function;
+        functionName.appendChild(functionCode);
+        notice.append(functionName, '(');
+        const argumentsList = Object.entries(frame.function_call.arguments || {});
+        argumentsList.forEach(([name, value], index) => {
+          if (index > 0) notice.append(', ');
+          const argument = document.createElement('code');
+          argument.textContent = `${name}=${formatValue(value)}`;
+          notice.appendChild(argument);
+        });
+        notice.append(')');
+        card.appendChild(notice);
+      }
+
+      if (frame.input_return) {
+        const typedNotice = document.createElement('div');
+        typedNotice.className = 'return-notice';
+        typedNotice.append('The user typed ');
+        const typedText = document.createElement('code');
+        typedText.textContent = JSON.stringify(frame.input_return.typed_text);
+        typedNotice.appendChild(typedText);
+        card.appendChild(typedNotice);
+
+        const inputReturnNotice = document.createElement('div');
+        inputReturnNotice.className = 'return-notice';
+        inputReturnNotice.append('Function ');
+        const inputFunction = document.createElement('strong');
+        const inputFunctionCode = document.createElement('code');
+        inputFunctionCode.textContent = 'input';
+        inputFunction.appendChild(inputFunctionCode);
+        inputReturnNotice.append(inputFunction, ' returned ');
+        const inputType = document.createElement('span');
+        inputType.textContent = displayTypeLabel(frame.input_return.value);
+        inputReturnNotice.append(inputType, ' ');
+        const inputValue = document.createElement('code');
+        inputValue.textContent = formatValue(frame.input_return.value);
+        inputReturnNotice.appendChild(inputValue);
+        card.appendChild(inputReturnNotice);
+      }
+
+      const returned = frame.call_return || (
+        frame.event === 'return' && frame.return
+          ? { qualified_function: frame.qualified_function, value: frame.return.value }
+          : null
+      );
+      if (returned) {
+        const notice = document.createElement('div');
+        notice.className = 'return-notice';
+        notice.append('function ');
+
+        const functionName = document.createElement('strong');
+        const functionCode = document.createElement('code');
+        functionCode.textContent = returned.qualified_function;
+        functionName.appendChild(functionCode);
+        notice.append(functionName, frame.call_return ? ' returned ' : ' returning ');
+
+        const returnType = document.createElement('span');
+        returnType.textContent = displayTypeLabel(returned.value);
+        notice.append(returnType);
+
+        if (returned.value.type !== 'opaque') {
+          const returnValue = document.createElement('code');
+          returnValue.textContent = formatValue(returned.value);
+          notice.append(returnValue);
+        }
+        card.appendChild(notice);
+      }
+      if (frame.exception) {
+        card.appendChild(renderException(frame.exception));
+      }
+      return card;
+    }
+
+    function renderException(exception) {
+      const notice = document.createElement('div');
+      notice.className = 'exception-notice';
+
+      const title = document.createElement('div');
+      title.className = 'traceback-title';
+      title.textContent = 'Traceback (most recent call last):';
+      notice.appendChild(title);
+
+      for (const frame of exception.traceback || []) {
+        const entry = document.createElement('div');
+        entry.className = 'traceback-frame';
+        const location = document.createElement('pre');
+        location.className = 'traceback-location';
+        location.textContent = `  File "${frame.filename}", line ${frame.lineno}, in ${frame.function}`;
+        entry.appendChild(location);
+        if (frame.source) {
+          const source = document.createElement('pre');
+          source.className = 'traceback-source';
+          source.textContent = `    ${frame.source}`;
+          entry.appendChild(source);
+        }
+        notice.appendChild(entry);
+      }
+
+      const summary = document.createElement('div');
+      summary.className = 'exception-summary';
+      const type = document.createElement('strong');
+      type.textContent = exception.type;
+      summary.append(type, exception.message ? `: ${exception.message}` : '');
+      notice.appendChild(summary);
+      return notice;
+    }
+
+    function renderCallStack(snapshot) {
+      frames.replaceChildren();
+      const fragment = document.createDocumentFragment();
+      for (const caller of snapshot.callers || []) {
+        fragment.appendChild(renderFrame(caller));
+      }
+      fragment.appendChild(renderFrame(snapshot, true));
+      frames.appendChild(fragment);
+      frames.scrollTop = frames.scrollHeight;
+    }
+
+    function renderConsole() {
+      const chunks = [];
+      for (let snapshotIndex = 0; snapshotIndex <= index; snapshotIndex++) {
+        for (const chunk of snapshots[snapshotIndex].console || []) {
+          const previous = chunks[chunks.length - 1];
+          if (previous && previous.stream === chunk.stream) {
+            previous.text += chunk.text;
+          } else {
+            chunks.push({ stream: chunk.stream, text: chunk.text });
+          }
+        }
+      }
+
+      const fragment = document.createDocumentFragment();
+      for (const chunk of chunks) {
+        const span = document.createElement('span');
+        span.className = chunk.stream === 'stdin' ? 'stdin' : 'stdout';
+        span.textContent = chunk.text;
+        fragment.appendChild(span);
+      }
+      consoleOutput.replaceChildren(fragment);
+      consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    }
+
+    function renderSnapshot() {
+      const snapshot = snapshots[index];
+      if (!snapshot) {
+        frames.replaceChildren();
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No snapshots were recorded.';
+        frames.appendChild(empty);
+        position.textContent = '0 / 0';
+        previousButton.disabled = true;
+        nextButton.disabled = true;
+        consoleOutput.replaceChildren();
+        return;
+      }
+
+      updateSourceHighlights();
+      if (hoveredLine !== null) setHoveredLine(hoveredLine);
+      renderCallStack(snapshot);
+      renderConsole();
+      position.textContent = `${index + 1} / ${snapshots.length}`;
+      previousButton.disabled = index === 0;
+      nextButton.disabled = index === snapshots.length - 1;
+      requestAnimationFrame(positionLineJumpControls);
+    }
+
+    sourceFallback.addEventListener('mouseover', event => {
+      const line = event.target.closest?.('.source-line');
+      if (line) setHoveredLine(Number(line.id.replace('source-line-', '')), line.getBoundingClientRect());
+    });
+    document.getElementById('source').addEventListener('mouseleave', () => setHoveredLine(null));
+    document.getElementById('source').addEventListener('scroll', positionLineJumpControls);
+
+    previousButton.addEventListener('click', () => {
+      if (index > 0) {
+        index -= 1;
+        renderSnapshot();
+      }
+    });
+    nextButton.addEventListener('click', () => {
+      if (index < snapshots.length - 1) {
+        index += 1;
+        renderSnapshot();
+      }
+    });
+    document.addEventListener('keydown', event => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key === 'ArrowLeft') {
+        if (index > 0) {
+          index -= 1;
+          renderSnapshot();
+        }
+        event.preventDefault();
+      } else if (event.key === 'ArrowRight') {
+        if (index < snapshots.length - 1) {
+          index += 1;
+          renderSnapshot();
+        }
+        event.preventDefault();
+      }
+    });
+
+    function loadStylesheet(url) {
+      return new Promise((resolve, reject) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = url;
+        link.onload = resolve;
+        link.onerror = () => reject(new Error(`Could not load stylesheet: ${url}`));
+        document.head.appendChild(link);
+      });
+    }
+
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = url;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Could not load script: ${url}`));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function enableCodeMirror() {
+      const cdn = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5';
+      try {
+        await Promise.all([
+          loadStylesheet(`${cdn}/codemirror.min.css`),
+          loadStylesheet(`${cdn}/theme/idea.css`),
+        ]);
+        await loadScript(`${cdn}/codemirror.min.js`);
+        await loadScript(`${cdn}/mode/python/python.min.js`);
+        if (!window.CodeMirror || !window.CodeMirror.modes.python) return;
+
+        sourceEditorElement.value = recordingData.source;
+        codeEditor = window.CodeMirror.fromTextArea(sourceEditorElement, {
+          mode: 'python',
+          readOnly: true,
+          lineNumbers: true,
+          theme: 'idea',
+        });
+        codeEditor.setSize('100%', '100%');
+        codeEditor.getWrapperElement().addEventListener('mousemove', event => {
+          const position = codeEditor.coordsChar(
+            { left: event.clientX, top: event.clientY },
+            'window'
+          );
+          const lineRect = codeEditor.charCoords(
+            { line: position.line, ch: 0 },
+            'window'
+          );
+          setHoveredLine(position.line + 1, lineRect);
+        });
+        codeEditor.on('scroll', positionLineJumpControls);
+        sourceFallback.hidden = true;
+        updateSourceHighlights();
+      } catch (error) {
+        if (codeEditor) {
+          codeEditor.toTextArea();
+          codeEditor = null;
+        }
+        sourceEditorElement.style.display = 'none';
+        sourceFallback.hidden = false;
+      }
+    }
+
+    document.getElementById('title').textContent = recordingData.filename || 'Trace recording';
+    renderSource();
+    renderSnapshot();
+    enableCodeMirror();
+  </script>
+</body>
+</html>

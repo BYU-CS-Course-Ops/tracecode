@@ -1,7 +1,7 @@
 """Demonstrate captured input and output.
 
 Run from the project root with:
-    printf 'Ada\n3\n' | tracecode --auto-open demos/console_io.py
+    printf 'Ada\n3\n' | tracecode --auto-open docs/demos/console_io.py
 """
 
 

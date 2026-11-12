@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Interactive tracecode demos for exploring Python execution step by step.">
+  <title>tracecode demos</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: system-ui, sans-serif;
+      line-height: 1.5;
+      color: #202124;
+      background: #f7f8fa;
+    }
+    body { max-width: 900px; margin: 0 auto; padding: 2rem 1.25rem; }
+    header { margin-bottom: 2rem; }
+    h1 { margin: 0 0 .5rem; color: #202a44; }
+    header p { margin: 0; color: #4c566a; }
+    .demos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 1rem; }
+    article { padding: 1.25rem; border: 1px solid #d9dee8; border-radius: .6rem; background: white; }
+    h2 { margin: 0 0 .4rem; font-size: 1.15rem; }
+    article p { margin: 0 0 .8rem; }
+    a { color: #174ea6; }
+    .source { color: #596579; font-size: .9rem; }
+    code { overflow-wrap: anywhere; }
+    footer { margin-top: 2rem; color: #596579; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>tracecode demos</h1>
+    <p>Explore Python execution one step at a time. Open a demo to move through its trace, inspect values, and follow calls and control flow.</p>
+  </header>
+
+  <main class="demos">
+    <article>
+      <h2><a href="demos/state_and_calls.html">State and calls</a></h2>
+      <p>Follow variable values through nested function calls and returns.</p>
+      <p class="source">Run from the project root: <code>tracecode --auto-open docs/demos/state_and_calls.py</code></p>
+    </article>
+    <article>
+      <h2><a href="demos/conditions.html">Conditions</a></h2>
+      <p>Inspect the outcomes of <code>if</code>/<code>elif</code> branches and a <code>while</code> loop.</p>
+      <p class="source">Run from the project root: <code>tracecode --auto-open docs/demos/conditions.py</code></p>
+    </article>
+    <article>
+      <h2><a href="demos/console_io.html">Console I/O</a></h2>
+      <p>See how standard input and output are captured in a trace.</p>
+      <p class="source">Run from the project root: <code>printf 'Ada\\n3\\n' | tracecode --auto-open docs/demos/console_io.py</code></p>
+    </article>
+    <article>
+      <h2><a href="demos/exceptions.html">Exceptions</a></h2>
+      <p>Follow a <code>ValueError</code> through nested calls and see it caught.</p>
+      <p class="source">Run from the project root: <code>printf 'not-a-number\\n' | tracecode --auto-open docs/demos/exceptions.py</code></p>
+    </article>
+    <article>
+      <h2><a href="demos/walkthrough.html">Combined walkthrough</a></h2>
+      <p>Explore calls, changing values, conditions, a loop, console I/O, and a caught exception together.</p>
+      <p class="source">Run from the project root: <code>printf '3\\n90\\n70\\n50\\nnot-a-number\\n' | tracecode --auto-open docs/demos/walkthrough.py</code></p>
+    </article>
+  </main>
+
+  <footer>
+    To generate a trace locally, run a demo script from the project root with <code>tracecode --auto-open docs/demos/&lt;name&gt;.py</code>.
+    See the <a href="https://github.com/BYU-CS-Course-Ops/tracecode">tracecode repository</a> for installation and usage.
+  </footer>
+</body>
+</html>

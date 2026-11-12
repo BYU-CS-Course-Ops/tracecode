@@ -1,7 +1,7 @@
 """Demonstrate recorded if, elif, and while condition outcomes.
 
 Run from the project root with:
-    tracecode --auto-open demos/conditions.py
+    tracecode --auto-open docs/demos/conditions.py
 """
 
 
