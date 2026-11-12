@@ -5,6 +5,7 @@
 It is intended for instructors who want to make a program's execution visible:
 
 - step through the source code forward and backward
+- jump forward or backward to any line of code
 - see variable values
 - observe function call mechanics
 - see console input/output at each step
