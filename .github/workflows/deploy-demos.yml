@@ -1,0 +1,57 @@
+name: Build and deploy demos
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tracecode
+        run: python -m pip install .
+
+      - name: Rebuild demo traces
+        run: |
+          tracecode docs/demos/state_and_calls.py
+          tracecode docs/demos/conditions.py
+          printf 'Ada\n3\n' | tracecode docs/demos/console_io.py
+          printf 'not-a-number\n' | tracecode docs/demos/exceptions.py
+          printf '3\n90\n70\n50\nnot-a-number\n' | tracecode docs/demos/walkthrough.py
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
