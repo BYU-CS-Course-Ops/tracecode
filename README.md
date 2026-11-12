@@ -4,9 +4,9 @@
 
 It is intended for instructors who want to make a program's execution visible: learners can move through the trace (forward and backward) to inspect the source, variable values, function calls, and console input/output at each step.
 
-<need gif here>
+[![Watch the interactive walkthrough](docs/walkthrough.gif)](https://byu-cs-course-ops.github.io/tracecode/demos/walkthrough.html)
 
-Check out our [live, interactive demos](https://byu-cs-course-ops.github.io/tracecode/).
+Explore the [live demos](https://byu-cs-course-ops.github.io/tracecode/) or visit the [GitHub repository](https://github.com/BYU-CS-Course-Ops/tracecode).
 
 ## Features
 
