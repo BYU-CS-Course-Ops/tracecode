@@ -5,10 +5,14 @@ Run from the project root with:
 """
 
 
+def is_cool(temperature):
+    return temperature < 20
+
+
 def describe_temperature(temperature):
     if temperature < 0:
         description = "below freezing"
-    elif temperature < 20:
+    elif is_cool(temperature):
         description = "cool"
     else:
         description = "warm"
