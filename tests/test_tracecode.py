@@ -64,6 +64,49 @@ def test_line_snapshots_capture_state_before_each_line(tmp_path):
     assert recording[-1]["return"] == {"value": {"type": "int", "data": 2}}
 
 
+def test_exec_source_records_python_and_builtin_calls_with_arguments_and_results(
+    tmp_path, monkeypatch
+):
+    source = (
+        "def run():\n"
+        "    text = input('value? ')\n"
+        "    number = int(text)\n"
+        "    return number\n"
+        "result = run()\n"
+    )
+    filename = tmp_path / "calls.py"
+    filename.write_text(source)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("42\n"))
+    recorder = TraceRecorder(target_file=str(filename))
+    namespace = {"__name__": "__main__", "__file__": str(filename)}
+
+    with recorder:
+        recorder.exec_source(namespace)
+
+    assert namespace["result"] == 42
+    calls = [item for item in recorder.recording if item["event"] == "call"]
+    assert [item["function_call"]["qualified_function"] for item in calls] == [
+        "run", "input", "int"
+    ]
+    assert calls[1]["function_call"]["positional_arguments"] == [
+        {"type": "str", "data": "value? "}
+    ]
+    assert calls[2]["function_call"]["positional_arguments"] == [
+        {"type": "str", "data": "42"}
+    ]
+    returned = [item for item in recorder.recording if item["event"] == "call_return"]
+    assert [item["call_return"]["qualified_function"] for item in returned] == [
+        "input", "int", "run"
+    ]
+    assert [item["call_return"]["value"] for item in returned[:2]] == [
+        {"type": "str", "data": "42"},
+        {"type": "int", "data": 42},
+    ]
+    assert [item["event"] for item in recorder.recording if item["event"].startswith("input_")] == [
+        "input_prompt", "input_return"
+    ]
+
+
 def test_records_if_elif_and_each_while_condition_without_helper_frames(tmp_path):
     source = (
         "def run():\n"
@@ -97,10 +140,12 @@ def test_records_if_elif_and_each_while_condition_without_helper_frames(tmp_path
         "while", "if", "while", "if", "if", "while"
     ]
     assert all(snapshot["function"] == "run" for snapshot in conditions)
+    assert all("globals" not in snapshot for snapshot in recorder.recording)
     assert all(
-        "tracecode_record_condition" not in repr(snapshot.get("globals", {}))
+        snapshot["callers"][-1]["function"] == "<module>"
         for snapshot in conditions
     )
+    assert "run" in decode_mapping(conditions[0]["callers"][-1]["locals"])
     assert all(
         caller["function"] != "_record_condition"
         for snapshot in conditions
@@ -276,6 +321,12 @@ def test_external_python_returns_are_recorded_at_the_target_boundary(tmp_path):
     result, recording = record_function(func, filename)
 
     assert result == (4, 9)
+    calls = [snapshot for snapshot in recording if snapshot["event"] == "call"]
+    assert [item["function_call"]["qualified_function"] for item in calls] == [
+        "outer", "direct"
+    ]
+    assert all(item["function"] == "run" and item["lineno"] == 2 for item in calls)
+    assert [item["function_call"]["arguments"] for item in calls] == [{}, {}]
     returns = [snapshot for snapshot in recording if snapshot["event"] == "call_return"]
     assert [(item["call_return"]["function"], item["call_return"]["value"]) for item in returns] == [
         ("outer", {"type": "int", "data": 4}),

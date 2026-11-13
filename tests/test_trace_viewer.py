@@ -40,6 +40,11 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert "#line-jump-controls" in html and "padding-right: 1rem" in html
     assert "async function enableCodeMirror()" in html
     assert "codemirror/5.65.5" in html
+    assert "addon/runmode/runmode.min.js" in html
+    assert "CodeMirror.runMode(text, 'python', element)" in html
+    assert "querySelectorAll('.return-notice code')" in html
+    assert "CodeMirror.runMode(valueText, 'python', renderedValue)" not in html
+    assert "renderCallStack(snapshots[index])" in html
     assert "readOnly: true" in html and "mode: 'python'" in html
     assert "sourceFallback.hidden = true" in html
     assert 'id="frames"' in html and "className = 'frame-card'" in html
@@ -72,10 +77,14 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert "frame.call_return" in html and "return-notice" in html
     assert "frame.function_call" in html and "Calling function " in html
     assert "frame.function_call.arguments" in html and "name}=${formatValue(value)}" in html
+    assert "frame.function_call.positional_arguments" in html
+    assert "for (const value of frame.function_call.positional_arguments || [])" in html
+    assert "notice.append('Function ')" in html
     assert "frame.input_return.typed_text" in html
-    assert "The user typed " in html and "inputReturnNotice.append(inputFunction, ' returned ')" in html
-    assert html.index("card.appendChild(typedNotice)") < html.index("card.appendChild(inputReturnNotice)")
+    assert "The user typed " in html
+    assert "inputReturnNotice" not in html
     assert "frame.call_return ? ' returned ' : ' returning '" in html
+    assert "frame.exit.script} exited with exit code ${frame.exit.code}" in html
     assert html.index("card.appendChild(variable)") < html.index("card.appendChild(notice)")
     assert "displayType(value)" in html and "variable.append(label, type, renderedValue)" not in html
     assert "function hasExceptionMessage(value)" in html

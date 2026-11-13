@@ -35,6 +35,8 @@ def test_cli_runs_script_with_arguments_and_writes_viewer(tmp_path, monkeypatch,
     )
     assert payload["filename"] == "script.py"
     assert any(snapshot["function"] == "run" for snapshot in payload["recording"])
+    assert payload["recording"][-1]["event"] == "exit"
+    assert payload["recording"][-1]["exit"] == {"script": "script.py", "code": 0}
     condition = next(
         snapshot["condition"]
         for snapshot in payload["recording"]
@@ -68,6 +70,8 @@ def test_cli_writes_trace_before_reporting_script_exception(tmp_path, capsys):
         ).group(1)
     )
     exceptions = [snapshot["exception"] for snapshot in payload["recording"] if "exception" in snapshot]
+    assert payload["recording"][-1]["event"] == "exit"
+    assert payload["recording"][-1]["exit"]["code"] == 1
     assert exceptions[-1]["type"] == "ValueError"
     assert exceptions[-1]["message"] == "script failed"
     assert "ValueError: script failed" in capsys.readouterr().err

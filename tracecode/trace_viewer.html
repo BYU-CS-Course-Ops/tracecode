@@ -308,10 +308,24 @@
       return `(${displayType(value)})${value.type === 'opaque' && !hasExceptionMessage(value) ? '' : ':'}`;
     }
 
+    function highlightPythonCode(element, text = element.textContent) {
+      if (!window.CodeMirror?.runMode || !window.CodeMirror.modes.python) return;
+      element.classList.add('cm-s-idea');
+      element.replaceChildren();
+      window.CodeMirror.runMode(text, 'python', element);
+    }
+
     function renderFrame(frame, isCurrent = false) {
       const card = document.createElement('article');
       card.className = 'frame-card';
       if (isCurrent) card.classList.add('current-frame');
+      if (frame.exit) {
+        const exitNotice = document.createElement('div');
+        exitNotice.className = 'return-notice';
+        exitNotice.textContent = `${frame.exit.script} exited with exit code ${frame.exit.code}`;
+        card.appendChild(exitNotice);
+        return card;
+      }
 
       const heading = document.createElement('div');
       heading.className = 'frame-heading';
@@ -343,9 +357,11 @@
           if (value.type !== 'opaque' || hasExceptionMessage(value)) {
             const renderedValue = document.createElement('pre');
             renderedValue.className = 'variable-value';
-            renderedValue.textContent = hasExceptionMessage(value)
+            const valueText = hasExceptionMessage(value)
               ? value.data.exception_message
               : formatValue(value);
+            renderedValue.textContent = valueText;
+            highlightPythonCode(renderedValue, valueText);
             variable.appendChild(renderedValue);
           }
           card.appendChild(variable);
@@ -373,13 +389,21 @@
         functionCode.textContent = frame.function_call.qualified_function;
         functionName.appendChild(functionCode);
         notice.append(functionName, '(');
-        const argumentsList = Object.entries(frame.function_call.arguments || {});
-        argumentsList.forEach(([name, value], index) => {
-          if (index > 0) notice.append(', ');
+        let hasArgument = false;
+        for (const value of frame.function_call.positional_arguments || []) {
+          if (hasArgument) notice.append(', ');
+          const argument = document.createElement('code');
+          argument.textContent = formatValue(value);
+          notice.appendChild(argument);
+          hasArgument = true;
+        }
+        for (const [name, value] of Object.entries(frame.function_call.arguments || {})) {
+          if (hasArgument) notice.append(', ');
           const argument = document.createElement('code');
           argument.textContent = `${name}=${formatValue(value)}`;
           notice.appendChild(argument);
-        });
+          hasArgument = true;
+        }
         notice.append(')');
         card.appendChild(notice);
       }
@@ -393,21 +417,6 @@
         typedNotice.appendChild(typedText);
         card.appendChild(typedNotice);
 
-        const inputReturnNotice = document.createElement('div');
-        inputReturnNotice.className = 'return-notice';
-        inputReturnNotice.append('Function ');
-        const inputFunction = document.createElement('strong');
-        const inputFunctionCode = document.createElement('code');
-        inputFunctionCode.textContent = 'input';
-        inputFunction.appendChild(inputFunctionCode);
-        inputReturnNotice.append(inputFunction, ' returned ');
-        const inputType = document.createElement('span');
-        inputType.textContent = displayTypeLabel(frame.input_return.value);
-        inputReturnNotice.append(inputType, ' ');
-        const inputValue = document.createElement('code');
-        inputValue.textContent = formatValue(frame.input_return.value);
-        inputReturnNotice.appendChild(inputValue);
-        card.appendChild(inputReturnNotice);
       }
 
       const returned = frame.call_return || (
@@ -418,7 +427,7 @@
       if (returned) {
         const notice = document.createElement('div');
         notice.className = 'return-notice';
-        notice.append('function ');
+        notice.append('Function ');
 
         const functionName = document.createElement('strong');
         const functionCode = document.createElement('code');
@@ -485,6 +494,9 @@
       }
       fragment.appendChild(renderFrame(snapshot, true));
       frames.appendChild(fragment);
+      for (const code of frames.querySelectorAll('.return-notice code')) {
+        highlightPythonCode(code);
+      }
       frames.scrollTop = frames.scrollHeight;
     }
 
@@ -604,6 +616,11 @@
         await loadScript(`${cdn}/codemirror.min.js`);
         await loadScript(`${cdn}/mode/python/python.min.js`);
         if (!window.CodeMirror || !window.CodeMirror.modes.python) return;
+        try {
+          await loadScript(`${cdn}/addon/runmode/runmode.min.js`);
+        } catch (error) {
+          // Keep source highlighting even if the optional stack-value highlighter fails.
+        }
 
         sourceEditorElement.value = recordingData.source;
         codeEditor = window.CodeMirror.fromTextArea(sourceEditorElement, {
@@ -627,6 +644,7 @@
         codeEditor.on('scroll', positionLineJumpControls);
         sourceFallback.hidden = true;
         updateSourceHighlights();
+        if (snapshots[index]) renderCallStack(snapshots[index]);
       } catch (error) {
         if (codeEditor) {
           codeEditor.toTextArea();

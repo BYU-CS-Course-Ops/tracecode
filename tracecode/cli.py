@@ -72,6 +72,18 @@ def main(argv: list[str] | None = None) -> int:
         sys.argv = previous_argv
         sys.path[:] = previous_path
 
+    recorder.recording.append(
+        {
+            "event": "exit",
+            "filename": str(script),
+            "lineno": None,
+            "function": "<exit>",
+            "qualified_function": "<exit>",
+            "locals": {},
+            "callers": [],
+            "exit": {"script": script.name, "code": exit_code},
+        }
+    )
     output = script.with_suffix(".html")
     write_html_view(recorder.recording, output, auto_open=args.auto_open)
     print(f"Trace written to {output}")

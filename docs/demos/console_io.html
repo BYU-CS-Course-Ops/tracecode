@@ -123,7 +123,7 @@
       <div id="console-output" role="log" aria-label="Console transcript"></div>
     </section>
   </main>
-  <script id="trace-data" type="application/json">{"filename": "console_io.py", "source": "\"\"\"Demonstrate captured input and output.\n\nRun from the project root with:\n    printf 'Ada\\n3\\n' | tracecode --auto-open docs/demos/console_io.py\n\"\"\"\n\n\ndef main():\n    name = input(\"Name: \")\n    count = int(input(\"How many practice problems did you finish? \"))\n    print(f\"{name} finished {count} practice problems.\")\n\n\nif __name__ == \"__main__\":\n    main()\n", "recording": [{"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 1, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {}, "callers": []}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 8, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {}, "callers": []}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 14, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "condition", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 14, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "condition": {"result": {"type": "bool", "data": true}, "kind": "if", "source": "__name__ == \"__main__\""}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 15, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "call", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 15, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "function_call": {"qualified_function": "main", "arguments": {}}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 9, "function": "main", "qualified_function": "main", "locals": {}, "globals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "input_prompt", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 9, "function": "main", "qualified_function": "main", "locals": {}, "globals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "console": [{"stream": "stdout", "text": "Name: "}], "prompt": "Name: "}, {"event": "input_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 9, "function": "main", "qualified_function": "main", "locals": {}, "globals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "console": [{"stream": "stdin", "text": "Ada\n"}], "input_return": {"typed_text": "Ada\n", "value": {"type": "str", "data": "Ada"}}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 10, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}}, "globals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "input_prompt", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 10, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}}, "globals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "console": [{"stream": "stdout", "text": "How many practice problems did you finish? "}], "prompt": "How many practice problems did you finish? "}, {"event": "input_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 10, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}}, "globals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "console": [{"stream": "stdin", "text": "3\n"}], "input_return": {"typed_text": "3\n", "value": {"type": "str", "data": "3"}}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 11, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}, "count": {"type": "int", "data": 3}}, "globals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 11, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}, "count": {"type": "int", "data": 3}}, "globals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "console": [{"stream": "stdout", "text": "Ada finished 3 practice problems."}, {"stream": "stdout", "text": "\n"}], "return": {"value": {"type": "NoneType", "data": null}}}, {"event": "call_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 15, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "call_return": {"function": "main", "qualified_function": "main", "value": {"type": "NoneType", "data": null}}}, {"event": "return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 15, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "return": {"value": {"type": "NoneType", "data": null}}}]}</script>
+  <script id="trace-data" type="application/json">{"filename": "console_io.py", "source": "\"\"\"Demonstrate captured input and output.\n\nRun from the project root with:\n    printf 'Ada\\n3\\n' | tracecode --auto-open docs/demos/console_io.py\n\"\"\"\n\n\ndef main():\n    name = input(\"Name: \")\n    count = int(input(\"How many practice problems did you finish? \"))\n    print(f\"{name} finished {count} practice problems.\")\n\n\nif __name__ == \"__main__\":\n    main()\n", "recording": [{"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 1, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {}, "callers": []}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 8, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {}, "callers": []}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 14, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "condition", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 14, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "condition": {"result": {"type": "bool", "data": true}, "kind": "if", "source": "__name__ == \"__main__\""}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 15, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": []}, {"event": "call", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 15, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "function_call": {"qualified_function": "main", "arguments": {}}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 9, "function": "main", "qualified_function": "main", "locals": {}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}]}, {"event": "call", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 9, "function": "main", "qualified_function": "main", "locals": {}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "function_call": {"qualified_function": "input", "arguments": {}, "positional_arguments": [{"type": "str", "data": "Name: "}]}}, {"event": "input_prompt", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 9, "function": "main", "qualified_function": "main", "locals": {}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "console": [{"stream": "stdout", "text": "Name: "}], "prompt": "Name: "}, {"event": "input_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 9, "function": "main", "qualified_function": "main", "locals": {}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "console": [{"stream": "stdin", "text": "Ada\n"}], "input_return": {"typed_text": "Ada\n", "value": {"type": "str", "data": "Ada"}}}, {"event": "call_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 9, "function": "main", "qualified_function": "main", "locals": {}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "call_return": {"function": "input", "qualified_function": "input", "value": {"type": "str", "data": "Ada"}}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 10, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}]}, {"event": "call", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 10, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "function_call": {"qualified_function": "input", "arguments": {}, "positional_arguments": [{"type": "str", "data": "How many practice problems did you finish? "}]}}, {"event": "input_prompt", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 10, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "console": [{"stream": "stdout", "text": "How many practice problems did you finish? "}], "prompt": "How many practice problems did you finish? "}, {"event": "input_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 10, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "console": [{"stream": "stdin", "text": "3\n"}], "input_return": {"typed_text": "3\n", "value": {"type": "str", "data": "3"}}}, {"event": "call_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 10, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "call_return": {"function": "input", "qualified_function": "input", "value": {"type": "str", "data": "3"}}}, {"event": "call", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 10, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "function_call": {"qualified_function": "int", "arguments": {}, "positional_arguments": [{"type": "str", "data": "3"}]}}, {"event": "call_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 10, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "call_return": {"function": "int", "qualified_function": "int", "value": {"type": "int", "data": 3}}}, {"event": "line", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 11, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}, "count": {"type": "int", "data": 3}}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}]}, {"event": "call", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 11, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}, "count": {"type": "int", "data": 3}}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "function_call": {"qualified_function": "print", "arguments": {}, "positional_arguments": [{"type": "str", "data": "Ada finished 3 practice problems."}]}}, {"event": "call_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 11, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}, "count": {"type": "int", "data": 3}}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "console": [{"stream": "stdout", "text": "Ada finished 3 practice problems."}, {"stream": "stdout", "text": "\n"}], "call_return": {"function": "print", "qualified_function": "print", "value": {"type": "NoneType", "data": null}}}, {"event": "return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 11, "function": "main", "qualified_function": "main", "locals": {"name": {"type": "str", "data": "Ada"}, "count": {"type": "int", "data": 3}}, "callers": [{"function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "lineno": 15, "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}}], "return": {"value": {"type": "NoneType", "data": null}}}, {"event": "call_return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 15, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "call_return": {"function": "main", "qualified_function": "main", "value": {"type": "NoneType", "data": null}}}, {"event": "return", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": 15, "function": "\u003cmodule\u003e", "qualified_function": "\u003cmodule\u003e", "locals": {"main": {"type": "opaque", "data": {"python_type": "function"}}}, "callers": [], "return": {"value": {"type": "NoneType", "data": null}}}, {"event": "exit", "filename": "/Users/gbean/projects/tracecode/docs/demos/console_io.py", "lineno": null, "function": "\u003cexit\u003e", "qualified_function": "\u003cexit\u003e", "locals": {}, "callers": [], "exit": {"script": "console_io.py", "code": 0}}]}</script>
   <script>
     const recordingData = JSON.parse(document.getElementById('trace-data').textContent);
     const sourceLines = recordingData.source.split(/\r\n|\n|\r/);
@@ -308,10 +308,24 @@
       return `(${displayType(value)})${value.type === 'opaque' && !hasExceptionMessage(value) ? '' : ':'}`;
     }
 
+    function highlightPythonCode(element, text = element.textContent) {
+      if (!window.CodeMirror?.runMode || !window.CodeMirror.modes.python) return;
+      element.classList.add('cm-s-idea');
+      element.replaceChildren();
+      window.CodeMirror.runMode(text, 'python', element);
+    }
+
     function renderFrame(frame, isCurrent = false) {
       const card = document.createElement('article');
       card.className = 'frame-card';
       if (isCurrent) card.classList.add('current-frame');
+      if (frame.exit) {
+        const exitNotice = document.createElement('div');
+        exitNotice.className = 'return-notice';
+        exitNotice.textContent = `${frame.exit.script} exited with exit code ${frame.exit.code}`;
+        card.appendChild(exitNotice);
+        return card;
+      }
 
       const heading = document.createElement('div');
       heading.className = 'frame-heading';
@@ -343,9 +357,11 @@
           if (value.type !== 'opaque' || hasExceptionMessage(value)) {
             const renderedValue = document.createElement('pre');
             renderedValue.className = 'variable-value';
-            renderedValue.textContent = hasExceptionMessage(value)
+            const valueText = hasExceptionMessage(value)
               ? value.data.exception_message
               : formatValue(value);
+            renderedValue.textContent = valueText;
+            highlightPythonCode(renderedValue, valueText);
             variable.appendChild(renderedValue);
           }
           card.appendChild(variable);
@@ -373,13 +389,21 @@
         functionCode.textContent = frame.function_call.qualified_function;
         functionName.appendChild(functionCode);
         notice.append(functionName, '(');
-        const argumentsList = Object.entries(frame.function_call.arguments || {});
-        argumentsList.forEach(([name, value], index) => {
-          if (index > 0) notice.append(', ');
+        let hasArgument = false;
+        for (const value of frame.function_call.positional_arguments || []) {
+          if (hasArgument) notice.append(', ');
+          const argument = document.createElement('code');
+          argument.textContent = formatValue(value);
+          notice.appendChild(argument);
+          hasArgument = true;
+        }
+        for (const [name, value] of Object.entries(frame.function_call.arguments || {})) {
+          if (hasArgument) notice.append(', ');
           const argument = document.createElement('code');
           argument.textContent = `${name}=${formatValue(value)}`;
           notice.appendChild(argument);
-        });
+          hasArgument = true;
+        }
         notice.append(')');
         card.appendChild(notice);
       }
@@ -393,21 +417,6 @@
         typedNotice.appendChild(typedText);
         card.appendChild(typedNotice);
 
-        const inputReturnNotice = document.createElement('div');
-        inputReturnNotice.className = 'return-notice';
-        inputReturnNotice.append('Function ');
-        const inputFunction = document.createElement('strong');
-        const inputFunctionCode = document.createElement('code');
-        inputFunctionCode.textContent = 'input';
-        inputFunction.appendChild(inputFunctionCode);
-        inputReturnNotice.append(inputFunction, ' returned ');
-        const inputType = document.createElement('span');
-        inputType.textContent = displayTypeLabel(frame.input_return.value);
-        inputReturnNotice.append(inputType, ' ');
-        const inputValue = document.createElement('code');
-        inputValue.textContent = formatValue(frame.input_return.value);
-        inputReturnNotice.appendChild(inputValue);
-        card.appendChild(inputReturnNotice);
       }
 
       const returned = frame.call_return || (
@@ -418,7 +427,7 @@
       if (returned) {
         const notice = document.createElement('div');
         notice.className = 'return-notice';
-        notice.append('function ');
+        notice.append('Function ');
 
         const functionName = document.createElement('strong');
         const functionCode = document.createElement('code');
@@ -485,6 +494,9 @@
       }
       fragment.appendChild(renderFrame(snapshot, true));
       frames.appendChild(fragment);
+      for (const code of frames.querySelectorAll('.return-notice code')) {
+        highlightPythonCode(code);
+      }
       frames.scrollTop = frames.scrollHeight;
     }
 
@@ -604,6 +616,11 @@
         await loadScript(`${cdn}/codemirror.min.js`);
         await loadScript(`${cdn}/mode/python/python.min.js`);
         if (!window.CodeMirror || !window.CodeMirror.modes.python) return;
+        try {
+          await loadScript(`${cdn}/addon/runmode/runmode.min.js`);
+        } catch (error) {
+          // Keep source highlighting even if the optional stack-value highlighter fails.
+        }
 
         sourceEditorElement.value = recordingData.source;
         codeEditor = window.CodeMirror.fromTextArea(sourceEditorElement, {
@@ -627,6 +644,7 @@
         codeEditor.on('scroll', positionLineJumpControls);
         sourceFallback.hidden = true;
         updateSourceHighlights();
+        if (snapshots[index]) renderCallStack(snapshots[index]);
       } catch (error) {
         if (codeEditor) {
           codeEditor.toTextArea();
