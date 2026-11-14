@@ -7,6 +7,8 @@ import linecache
 import os
 import sys
 import tokenize
+import uuid
+from contextvars import ContextVar
 from types import TracebackType
 from typing import Any, Callable, Protocol
 
@@ -142,6 +144,62 @@ class _RecordingInputStream:
         return getattr(self._stream, name)
 
 
+_ACTIVE_RECORDER: ContextVar[Any | None] = ContextVar("tracecode_active_recorder", default=None)
+
+
+def _active_call_proxy(function: Any, source_name: str) -> Any:
+    recorder = _ACTIVE_RECORDER.get()
+    if recorder is None or not recorder._active:
+        return function
+    return recorder._make_call_proxy(function, source_name)
+
+
+def _active_record_condition(value: Any, kind: str, source: str) -> bool:
+    recorder = _ACTIVE_RECORDER.get()
+    if recorder is None or not recorder._active:
+        return bool(value)
+    caller = inspect.currentframe().f_back
+    return recorder._record_condition(value, kind, source, frame=caller)
+
+
+class PreparedSource:
+    """An instrumented source file that can be executed in any namespace."""
+
+    def __init__(self, source: str, filename: str):
+        self.source = source
+        self.filename = os.path.realpath(filename)
+        syntax_tree = ast.parse(source, filename=self.filename)
+        names = {
+            node.id for node in ast.walk(syntax_tree) if isinstance(node, ast.Name)
+        }
+        suffix = uuid.uuid4().hex
+        self.call_helper_name = f"__tracecode_call_{suffix}__"
+        self.condition_helper_name = f"__tracecode_condition_{suffix}__"
+        while self.call_helper_name in names or self.condition_helper_name in names:
+            suffix = uuid.uuid4().hex
+            self.call_helper_name = f"__tracecode_call_{suffix}__"
+            self.condition_helper_name = f"__tracecode_condition_{suffix}__"
+        syntax_tree = _CallInstrumenter(self.call_helper_name, source).visit(syntax_tree)
+        syntax_tree = _ConditionInstrumenter(self.condition_helper_name, source).visit(syntax_tree)
+        ast.fix_missing_locations(syntax_tree)
+        self._code = compile(syntax_tree, self.filename, "exec", dont_inherit=True)
+
+    def execute(self, namespace: dict[str, Any]) -> None:
+        """Execute in a namespace; recording occurs only if a recorder is active."""
+        if self.call_helper_name in namespace or self.condition_helper_name in namespace:
+            raise RuntimeError("Prepared source helper name collides with its namespace")
+        namespace[self.call_helper_name] = _active_call_proxy
+        namespace[self.condition_helper_name] = _active_record_condition
+        exec(self._code, namespace)  # noqa: S102 - execute prepared student source
+
+
+def prepare_file(filename: str | os.PathLike[str]) -> PreparedSource:
+    """Read, instrument, and compile a Python file without executing it."""
+    path = os.path.realpath(os.fspath(filename))
+    with tokenize.open(path) as source_file:
+        return PreparedSource(source_file.read(), path)
+
+
 class TraceRecorder:
     """Record execution snapshots and console deltas for one Python source file."""
 
@@ -167,6 +225,7 @@ class TraceRecorder:
         self._target_frame = None
         self._previous_target_frame_trace = None
         self._active = False
+        self._context_token = None
         self._recording: list[dict[str, Any]] = []
         self._snapshot_count = 0
         self._source_lines: list[str] = []
@@ -238,39 +297,11 @@ class TraceRecorder:
             sys.stdin = _RecordingInputStream(self._previous_stdin, self._record_console)
         builtins.input = self._recording_input
         self._active = True
+        self._context_token = _ACTIVE_RECORDER.set(self)
         sys.settrace(self._trace)
         if self._target_frame is not None:
             self._target_frame.f_trace = self._trace
         return self
-
-    def exec_source(self, namespace: dict[str, Any]):
-        """Execute this recorder's source after instrumenting if/elif/while tests."""
-        if not self._active:
-            raise RuntimeError("TraceRecorder must be active to execute source")
-        syntax_tree = ast.parse(self._source, filename=self._target_file)
-        names = {
-            node.id
-            for node in ast.walk(syntax_tree)
-            if isinstance(node, ast.Name)
-        }
-        call_helper_name = "__tracecode_call__"
-        condition_helper_name = "__tracecode_record_condition__"
-        while (
-            call_helper_name in names
-            or call_helper_name in namespace
-            or condition_helper_name in names
-            or condition_helper_name in namespace
-        ):
-            call_helper_name += "_"
-            condition_helper_name += "_"
-        self._condition_helper_name = condition_helper_name
-        namespace[call_helper_name] = self._make_call_proxy
-        namespace[condition_helper_name] = self._record_condition
-        syntax_tree = _CallInstrumenter(call_helper_name, self._source).visit(syntax_tree)
-        syntax_tree = _ConditionInstrumenter(condition_helper_name, self._source).visit(syntax_tree)
-        ast.fix_missing_locations(syntax_tree)
-        code = compile(syntax_tree, self._target_file, "exec", dont_inherit=True)
-        exec(code, namespace)
 
     def _make_call_proxy(self, function: Any, source_name: str) -> Any:
         if inspect.isfunction(function):
@@ -297,9 +328,10 @@ class TraceRecorder:
             {"qualified_function": source_name, "value": value},
         )
 
-    def _record_condition(self, value: Any, kind: str, source: str) -> bool:
+    def _record_condition(self, value: Any, kind: str, source: str, frame=None) -> bool:
         result = bool(value)
-        frame = inspect.currentframe().f_back
+        if frame is None:
+            frame = inspect.currentframe().f_back
         if (
             self._active
             and frame is not None
@@ -319,6 +351,9 @@ class TraceRecorder:
         exc_tb: TracebackType | None,
     ) -> bool:
         self._stop_tracing()
+        if self._context_token is not None:
+            _ACTIVE_RECORDER.reset(self._context_token)
+            self._context_token = None
         self._previous_trace = None
         return False
 
@@ -360,6 +395,8 @@ class TraceRecorder:
                 TraceRecorder._make_call_proxy.__code__,
                 _CallProxy.__call__.__code__,
                 _TeeTextStream.write.__code__,
+                _active_call_proxy.__code__,
+                _active_record_condition.__code__,
             )
             is_generator = bool(
                 frame.f_code.co_flags

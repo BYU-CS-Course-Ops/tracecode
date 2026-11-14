@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from tracecode import RecordingLimitExceeded, TraceRecorder
+from tracecode import RecordingLimitExceeded, TraceRecorder, prepare_file
 
 
 def load_function(tmp_path, source, name="run", namespace=None):
@@ -42,6 +42,42 @@ def record_function(func, filename, **options):
     return result, recorder.recording
 
 
+def test_prepared_module_can_load_unrecorded_then_record_one_function(tmp_path):
+    filename = tmp_path / "student.py"
+    filename.write_text(
+        "module_setup = 'completed'\n"
+        "def helper(value):\n"
+        "    return value * 2\n"
+        "def run(value):\n"
+        "    if value > 1:\n"
+        "        return helper(value)\n"
+        "    return 0\n"
+    )
+    prepared = prepare_file(filename)
+    namespace = {"__name__": "_student_load", "__file__": str(filename)}
+    assert "module_setup" not in namespace
+    prepared.execute(namespace)
+    assert namespace["module_setup"] == "completed"
+    assert namespace["run"](1) == 0  # Instrumentation is transparent without a recorder.
+
+    recorder = TraceRecorder(target_file=str(filename))
+    with recorder:
+        result = namespace["run"](3)
+
+    assert result == 6
+    assert not any(
+        snapshot["event"] == "line" and snapshot["function"] == "<module>"
+        for snapshot in recorder.recording
+    )
+    assert any(
+        snapshot.get("function") == "run" for snapshot in recorder.recording
+    )
+    assert any(
+        snapshot.get("function") == "helper" for snapshot in recorder.recording
+    )
+    assert any(snapshot["event"] == "condition" for snapshot in recorder.recording)
+
+
 def test_line_snapshots_capture_state_before_each_line(tmp_path):
     func, filename = load_function(
         tmp_path,
@@ -64,7 +100,7 @@ def test_line_snapshots_capture_state_before_each_line(tmp_path):
     assert recording[-1]["return"] == {"value": {"type": "int", "data": 2}}
 
 
-def test_exec_source_records_python_and_builtin_calls_with_arguments_and_results(
+def test_prepared_source_records_python_and_builtin_calls_with_arguments_and_results(
     tmp_path, monkeypatch
 ):
     source = (
@@ -78,10 +114,11 @@ def test_exec_source_records_python_and_builtin_calls_with_arguments_and_results
     filename.write_text(source)
     monkeypatch.setattr(sys, "stdin", io.StringIO("42\n"))
     recorder = TraceRecorder(target_file=str(filename))
+    prepared = prepare_file(filename)
     namespace = {"__name__": "__main__", "__file__": str(filename)}
 
     with recorder:
-        recorder.exec_source(namespace)
+        prepared.execute(namespace)
 
     assert namespace["result"] == 42
     calls = [item for item in recorder.recording if item["event"] == "call"]
@@ -123,9 +160,10 @@ def test_records_if_elif_and_each_while_condition_without_helper_frames(tmp_path
     filename.write_text(source)
     namespace = {"__name__": "__main__", "__file__": str(filename)}
     recorder = TraceRecorder(target_file=str(filename))
+    prepared = prepare_file(filename)
 
     with recorder:
-        recorder.exec_source(namespace)
+        prepared.execute(namespace)
 
     conditions = [
         snapshot for snapshot in recorder.recording if snapshot["event"] == "condition"

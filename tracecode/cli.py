@@ -6,7 +6,7 @@ import traceback
 import types
 from pathlib import Path
 
-from .code_tracer import TraceRecorder
+from .code_tracer import TraceRecorder, prepare_file
 from .trace_viewer import write_html_view
 
 
@@ -53,17 +53,26 @@ def main(argv: list[str] | None = None) -> int:
     previous_main_module = sys.modules.get("__main__")
     try:
         sys.modules["__main__"] = script_module
-        with recorder:
-            recorder.exec_source(script_module.__dict__)
-    except SystemExit as error:
-        if isinstance(error.code, int):
-            exit_code = error.code
-        elif error.code is not None:
-            print(error.code, file=sys.stderr)
+        try:
+            prepared = prepare_file(script)
+        except BaseException:
+            failure = sys.exc_info()
             exit_code = 1
-    except BaseException:
-        failure = sys.exc_info()
-        exit_code = 1
+            with recorder:
+                pass
+        else:
+            try:
+                with recorder:
+                    prepared.execute(script_module.__dict__)
+            except SystemExit as error:
+                if isinstance(error.code, int):
+                    exit_code = error.code
+                elif error.code is not None:
+                    print(error.code, file=sys.stderr)
+                    exit_code = 1
+            except BaseException:
+                failure = sys.exc_info()
+                exit_code = 1
     finally:
         if had_main_module:
             sys.modules["__main__"] = previous_main_module
