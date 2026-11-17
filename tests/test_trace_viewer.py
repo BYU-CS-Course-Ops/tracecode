@@ -4,6 +4,52 @@ import re
 from tracecode import write_html_view
 
 
+def test_console_is_hidden_without_captured_stdout_and_shown_with_stdout(tmp_path):
+    source = {"event": "source", "filename": "student.py", "source": ""}
+    no_output = write_html_view([source], tmp_path / "silent.html").read_text()
+    with_output = write_html_view(
+        [source, {"event": "line", "console": [{"stream": "stdout", "text": "hi\\n"}]}],
+        tmp_path / "output.html",
+    ).read_text()
+
+    assert 'id="console-heading" hidden' in no_output
+    assert 'id="console-output" role="log" aria-label="Console transcript" hidden' in no_output
+    assert 'id="console-heading" hidden' not in with_output
+    assert 'id="console-output" role="log" aria-label="Console transcript" hidden' not in with_output
+
+
+def test_writes_standalone_viewer_with_optional_custom_panel(tmp_path):
+    recording = [
+        {"event": "source", "filename": "student.py", "source": "pass\\n"},
+        {"event": "line", "lineno": 1, "locals": {}},
+    ]
+    output = write_html_view(
+        recording,
+        tmp_path / "panel.html",
+        panel_title="Bit world <state>",
+        panel_script="window.renderTracecodePanel = function () {};",
+    )
+    html = output.read_text(encoding="utf-8")
+
+    assert "Bit world &lt;state&gt;" in html
+    assert 'id="custom-panel"' in html
+    assert "window.renderTracecodePanel = function () {};" in html
+    assert "renderTracecodePanel(customPanel, snapshot, index, snapshots)" in html
+    assert "if (value.display === true) return value.data;" in html
+    assert html.index('id="custom-panel"') < html.index('id="frames"')
+
+
+def test_custom_panel_arguments_must_be_paired(tmp_path):
+    recording = [{"event": "source", "filename": "student.py", "source": ""}]
+
+    try:
+        write_html_view(recording, tmp_path / "invalid.html", panel_title="Panel")
+    except ValueError as error:
+        assert "provided together" in str(error)
+    else:
+        raise AssertionError("Expected ValueError for incomplete custom panel options")
+
+
 def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     source = 'print("</script>")\n# </textarea>\n# café\u2028'
     snapshot = {

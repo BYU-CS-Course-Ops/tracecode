@@ -76,6 +76,9 @@
     .traceback-title { padding: .35rem .55rem; font-weight: 600; }
     .traceback-frame { padding: 0 .55rem .45rem; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
     .traceback-location, .traceback-source { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+    #custom-panel { flex: none; max-height: 90vh; overflow: auto; border: 1px solid #c8ccd3; border-radius: .35rem; background: white; }
+    #custom-panel[hidden] { display: none; }
+    #custom-panel-heading[hidden] { display: none; }
     .frame-card { flex: none; overflow: hidden; border: 1px solid #cbd2dc; border-radius: .3rem; background: white; }
     .frame-heading { padding: .4rem .55rem; background: #e9edf3; font-size: 1rem; font-weight: 500; overflow-wrap: anywhere; }
     .current-frame .frame-heading { background: #fff0a6; }
@@ -117,10 +120,12 @@
       </div>
     </section>
     <section aria-label="Call stack and locals">
+      <h2 id="custom-panel-heading" __TRACE_PANEL_HIDDEN__>__TRACE_PANEL_TITLE__</h2>
+      <div id="custom-panel" role="region" aria-label="Custom trace panel" __TRACE_PANEL_HIDDEN__></div>
       <h2>Call stack</h2>
       <div id="frames" role="region" aria-label="Call frames"></div>
-      <h2 id="console-heading">Console</h2>
-      <div id="console-output" role="log" aria-label="Console transcript"></div>
+      <h2 id="console-heading" __TRACE_CONSOLE_HIDDEN__>Console</h2>
+      <div id="console-output" role="log" aria-label="Console transcript" __TRACE_CONSOLE_HIDDEN__></div>
     </section>
   </main>
   <script id="trace-data" type="application/json">__TRACE_RECORDING_JSON__</script>
@@ -131,6 +136,7 @@
     const sourceFallback = document.getElementById('source-fallback');
     const sourceEditorElement = document.getElementById('source-editor');
     const frames = document.getElementById('frames');
+    const customPanel = document.getElementById('custom-panel');
     const consoleOutput = document.getElementById('console-output');
     const position = document.getElementById('position');
     const previousButton = document.getElementById('previous');
@@ -271,6 +277,7 @@
     }
 
     function formatValue(value, depth = 0) {
+      if (value.display === true) return value.data;
       const { type, data } = value;
       if (type !== 'list' && type !== 'dict') {
         if (!['tuple', 'NoneType', 'bool', 'int', 'float', 'str', 'opaque'].includes(type)) {
@@ -541,6 +548,9 @@
 
       updateSourceHighlights();
       if (hoveredLine !== null) setHoveredLine(hoveredLine);
+      if (window.renderTracecodePanel) {
+        window.renderTracecodePanel(customPanel, snapshot, index, snapshots);
+      }
       renderCallStack(snapshot);
       renderConsole();
       position.textContent = `${index + 1} / ${snapshots.length}`;
@@ -655,6 +665,7 @@
       }
     }
 
+    __TRACE_PANEL_SCRIPT__
     document.getElementById('title').textContent = recordingData.filename || 'Trace recording';
     renderSource();
     renderSnapshot();

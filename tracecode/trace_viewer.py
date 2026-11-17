@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import webbrowser
 from pathlib import Path
@@ -14,14 +15,24 @@ def write_html_view(
     recording: list[dict[str, Any]],
     output_path: str | Path,
     auto_open: bool = False,
+    *,
+    panel_title: str | None = None,
+    panel_script: str | None = None,
 ) -> Path:
-    """Write a standalone HTML viewer for a source record and its trace snapshots."""
+    """Write a standalone HTML viewer, optionally with an embedded custom panel."""
+    if (panel_title is None) != (panel_script is None):
+        raise ValueError("panel_title and panel_script must be provided together")
     source_records = [record for record in recording if record.get("event") == "source"]
     if len(source_records) != 1:
         raise ValueError("Recording must contain exactly one source record")
 
     source_record = source_records[0]
     snapshots = [record for record in recording if record.get("event") != "source"]
+    has_stdout = any(
+        chunk.get("stream") == "stdout"
+        for snapshot in snapshots
+        for chunk in snapshot.get("console", [])
+    )
     output_path = Path(output_path)
     payload = json.dumps(
         {
@@ -41,10 +52,19 @@ def write_html_view(
     )
 
     template = _TEMPLATE.read_text(encoding="utf-8")
-    if template.count(_DATA_MARKER) != 1:
-        raise RuntimeError(f"Expected one recording-data marker in {_TEMPLATE}")
+    replacements = {
+        _DATA_MARKER: safe_payload,
+        "__TRACE_PANEL_TITLE__": "" if panel_title is None else html.escape(panel_title),
+        "__TRACE_PANEL_SCRIPT__": "" if panel_script is None else panel_script,
+        "__TRACE_PANEL_HIDDEN__": "hidden" if panel_title is None else "",
+        "__TRACE_CONSOLE_HIDDEN__": "" if has_stdout else "hidden",
+    }
+    for marker, replacement in replacements.items():
+        if marker not in template:
+            raise RuntimeError(f"Expected {marker} marker in {_TEMPLATE}")
+        template = template.replace(marker, replacement)
 
-    output_path.write_text(template.replace(_DATA_MARKER, safe_payload), encoding="utf-8")
+    output_path.write_text(template, encoding="utf-8")
     if auto_open:
         webbrowser.open(output_path.resolve().as_uri())
     return output_path
