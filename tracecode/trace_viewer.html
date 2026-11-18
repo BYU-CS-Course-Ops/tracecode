@@ -66,9 +66,21 @@
     #line-jump-controls button { padding: 0 .2rem; font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
     #run-tabs { display: flex; justify-content: center; gap: .4rem; padding: .4rem; background: #e9edf3; }
     #run-tabs[hidden] { display: none; }
-    #run-tabs button.active { border: 2px solid #202a44; font-weight: 700; }
+    #run-tabs button.active { border: 2px solid #202a44; }
+    #run-tabs button.world-correct::after,
+    #run-tabs button.world-incorrect::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border: 1px solid transparent;
+      border-radius: inherit;
+      pointer-events: none;
+    }
+    #run-tabs button.world-correct::after { border-color: #28a745; }
+    #run-tabs button.world-incorrect::after { border-color: #dc3545; }
     #controls { position: relative; display: flex; justify-content: center; align-items: center; gap: .45rem; flex: none; padding-top: .55rem; }
-    button { padding: .35rem .7rem; }
+    #controls button, #run-tabs button { padding: .35rem .7rem; border-radius: 4px; font-weight: 700; }
+    #run-tabs button { position: relative; }
     button:disabled { opacity: .5; }
     #position { position: absolute; right: 0; font-variant-numeric: tabular-nums; }
     #frames { display: flex; flex-direction: column; gap: .45rem; padding: .4rem; box-sizing: border-box; }
@@ -118,8 +130,10 @@
         </div>
       </div>
       <div id="controls">
+        <button id="beginning" type="button" title="Up Arrow">Beginning</button>
         <button id="previous" type="button">Previous</button>
         <button id="next" type="button">Next</button>
+        <button id="end" type="button" title="Down Arrow">End</button>
         <span id="position" aria-live="polite"></span>
       </div>
     </section>
@@ -140,22 +154,26 @@
     let currentRun = runs[0];
     let sourceLines = currentRun.source.split(/\r\n|\n|\r/);
     let snapshots = currentRun.recording;
-    const runIndexes = runs.map(() => 0);
+    const runIndexes = runs.map(run =>
+      recordingData.start_at_end ? Math.max(0, run.recording.length - 1) : 0
+    );
     const sourceFallback = document.getElementById('source-fallback');
     const sourceEditorElement = document.getElementById('source-editor');
     const frames = document.getElementById('frames');
     const customPanel = document.getElementById('custom-panel');
     const consoleOutput = document.getElementById('console-output');
     const position = document.getElementById('position');
+    const beginningButton = document.getElementById('beginning');
     const previousButton = document.getElementById('previous');
     const nextButton = document.getElementById('next');
+    const endButton = document.getElementById('end');
     const lineJumpControls = document.getElementById('line-jump-controls');
     const runTabs = document.getElementById('run-tabs');
     const jumpPreviousButton = document.getElementById('jump-previous');
     const jumpNextButton = document.getElementById('jump-next');
     const snapshotsByLine = new Map();
     let hoveredLine = null;
-    let index = 0;
+    let index = runIndexes[0] || 0;
     let highlightedLine = null;
     let highlightedCallerLines = new Set();
     let codeEditor = null;
@@ -210,6 +228,8 @@
         button.type = 'button';
         button.textContent = run.name || run.filename || `Run ${runIndex + 1}`;
         button.classList.toggle('active', runIndex === currentRunIndex);
+        button.classList.toggle('world-correct', run.status === 'correct');
+        button.classList.toggle('world-incorrect', run.status === 'incorrect');
         button.addEventListener('click', () => selectRun(runIndex));
         runTabs.appendChild(button);
       });
@@ -385,6 +405,14 @@
         card.appendChild(heading);
       }
 
+      if (frame.module_complete) {
+        const notice = document.createElement('div');
+        notice.className = 'return-notice';
+        notice.textContent = frame.completion;
+        card.appendChild(notice);
+        return card;
+      }
+
       if (frame.module_call) {
         const notice = document.createElement('div');
         notice.className = 'return-notice';
@@ -497,16 +525,22 @@
           ? `${returned.qualified_function}()`
           : returned.qualified_function;
         functionName.appendChild(functionCode);
-        notice.append(functionName, frame.call_return ? ' returned ' : ' returning ');
+        const isNoneReturn = returned.value.type === 'NoneType';
+        notice.append(
+          functionName,
+          isNoneReturn ? ' returning' : frame.call_return ? ' returned ' : ' returning '
+        );
 
-        const returnType = document.createElement('span');
-        returnType.textContent = displayTypeLabel(returned.value);
-        notice.append(returnType);
+        if (!isNoneReturn) {
+          const returnType = document.createElement('span');
+          returnType.textContent = displayTypeLabel(returned.value);
+          notice.append(returnType);
 
-        if (returned.value.type !== 'opaque') {
-          const returnValue = document.createElement('code');
-          returnValue.textContent = formatValue(returned.value);
-          notice.append(returnValue);
+          if (returned.value.type !== 'opaque') {
+            const returnValue = document.createElement('code');
+            returnValue.textContent = formatValue(returned.value);
+            notice.append(returnValue);
+          }
         }
         card.appendChild(notice);
       }
@@ -597,8 +631,10 @@
         empty.textContent = 'No snapshots were recorded.';
         frames.appendChild(empty);
         position.textContent = '0 / 0';
+        beginningButton.disabled = true;
         previousButton.disabled = true;
         nextButton.disabled = true;
+        endButton.disabled = true;
         consoleOutput.replaceChildren();
         return;
       }
@@ -611,8 +647,10 @@
       renderCallStack(snapshot);
       renderConsole();
       position.textContent = `${index + 1} / ${snapshots.length}`;
+      beginningButton.disabled = index === 0;
       previousButton.disabled = index === 0;
       nextButton.disabled = index === snapshots.length - 1;
+      endButton.disabled = index === snapshots.length - 1;
       requestAnimationFrame(positionLineJumpControls);
     }
 
@@ -623,6 +661,10 @@
     document.getElementById('source').addEventListener('mouseleave', () => setHoveredLine(null));
     document.getElementById('source').addEventListener('scroll', positionLineJumpControls);
 
+    beginningButton.addEventListener('click', () => {
+      index = 0;
+      renderSnapshot();
+    });
     previousButton.addEventListener('click', () => {
       if (index > 0) {
         index -= 1;
@@ -635,9 +677,21 @@
         renderSnapshot();
       }
     });
+    endButton.addEventListener('click', () => {
+      index = Math.max(0, snapshots.length - 1);
+      renderSnapshot();
+    });
     document.addEventListener('keydown', event => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      if (event.key === 'ArrowLeft') {
+      if (event.key === 'ArrowUp') {
+        index = 0;
+        renderSnapshot();
+        event.preventDefault();
+      } else if (event.key === 'ArrowDown') {
+        index = Math.max(0, snapshots.length - 1);
+        renderSnapshot();
+        event.preventDefault();
+      } else if (event.key === 'ArrowLeft') {
         if (index > 0) {
           index -= 1;
           renderSnapshot();

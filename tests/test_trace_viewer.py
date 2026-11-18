@@ -44,17 +44,23 @@ def test_viewer_renders_custom_module_call_frame_without_locals():
     assert "if (frame.module_call || frame.module_return)" in html
     assert "functionName.textContent = 'Module'" in html
     assert "notice.append(calledFunction, '()')" in html
+    assert "if (frame.module_complete)" in html
+    assert "notice.textContent = frame.completion" in html
     assert "`${returned.qualified_function}()`" in html
+    assert "const isNoneReturn = returned.value.type === 'NoneType'" in html
+    assert "isNoneReturn ? ' returning'" in html
+    assert "if (!isNoneReturn)" in html
 
 
 def test_writes_multi_run_viewer_with_run_switcher(tmp_path):
     source = {"event": "source", "filename": "student.py", "source": "pass\\n"}
     runs = {
-        "World A": [source, {"event": "line", "lineno": 1, "locals": {}}],
-        "World B": [source, {"event": "return", "lineno": 1, "locals": {}}],
+        "World A": [source, {"event": "line", "lineno": 1, "locals": {}, "run_status": "correct"}],
+        "World B": [source, {"event": "return", "lineno": 1, "locals": {}, "run_status": "incorrect"}],
+        "Empty": [source, {"event": "line", "lineno": 1, "locals": {}, "run_status": None}],
     }
     output = write_html_view(
-        runs["World A"], tmp_path / "runs.html", runs=runs
+        runs["World A"], tmp_path / "runs.html", runs=runs, start_at_end=True
     )
     html = output.read_text(encoding="utf-8")
     payload = json.loads(re.search(
@@ -63,10 +69,21 @@ def test_writes_multi_run_viewer_with_run_switcher(tmp_path):
         re.DOTALL,
     ).group(1))
 
-    assert [run["name"] for run in payload["runs"]] == ["World A", "World B"]
+    assert [run["name"] for run in payload["runs"]] == ["World A", "World B", "Empty"]
+    assert [run["status"] for run in payload["runs"]] == ["correct", "incorrect", None]
+    assert payload["start_at_end"] is True
+    assert "run.recording.length - 1" in html
     assert 'id="run-tabs"' in html
     assert "function selectRun(runIndex)" in html
     assert "currentRun.recording" in html
+    assert "world-correct" in html and "world-incorrect" in html
+    assert "#run-tabs button.world-correct::after" in html
+    assert "#run-tabs button.world-incorrect::after" in html
+    assert "border-radius: inherit" in html
+    assert "border-color: #28a745" in html
+    assert "border-color: #dc3545" in html
+    assert "box-shadow" not in html
+    assert "button.classList.toggle('world-correct', run.status === 'correct')" in html
 
 
 def test_writes_standalone_viewer_with_optional_custom_panel(tmp_path):
@@ -131,7 +148,10 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert payload == {"filename": "student.py", "source": source, "recording": [snapshot]}
     assert "</script>" not in embedded_json
     assert "</textarea>" not in embedded_json
-    assert "Previous" in html and "Next" in html
+    assert "Beginning" in html and "Previous" in html
+    assert "Next" in html and "End" in html
+    assert html.index('id="beginning"') < html.index('id="previous"')
+    assert html.index('id="previous"') < html.index('id="next"') < html.index('id="end"')
     assert "textContent = line" in html
     assert 'id="source-fallback"' in html
     assert "#line-jump-controls" in html and "padding-right: 1rem" in html
@@ -165,8 +185,12 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert html.index("for (const frame of exception.traceback") < html.index("notice.appendChild(summary)")
     assert "getWrapperElement().addEventListener('mousemove'" in html
     assert "codeEditor.on('mousemove'" not in html
+    assert "if (event.key === 'ArrowUp')" in html
+    assert "if (event.key === 'ArrowDown')" in html
     assert "if (event.key === 'ArrowLeft')" in html
     assert "if (event.key === 'ArrowRight')" in html
+    assert "beginningButton.addEventListener('click'" in html
+    assert "endButton.addEventListener('click'" in html
     assert "function positionLineJumpControls()" in html
     assert "requestAnimationFrame(positionLineJumpControls)" in html
     assert "codeEditor.on('scroll', positionLineJumpControls)" in html

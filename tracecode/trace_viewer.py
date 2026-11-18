@@ -19,6 +19,7 @@ def write_html_view(
     panel_title: str | None = None,
     panel_script: str | None = None,
     runs: dict[str, list[dict[str, Any]]] | None = None,
+    start_at_end: bool = False,
 ) -> Path:
     """Write a standalone HTML viewer, optionally with an embedded custom panel."""
     if (panel_title is None) != (panel_script is None):
@@ -34,11 +35,17 @@ def write_html_view(
         source = next((item for item in run_recording if item.get("event") == "source"), None)
         if source is None:
             raise ValueError(f"Run {name!r} has no source record")
+        snapshots = [item for item in run_recording if item.get("event") != "source"]
+        run_status = next(
+            (item["run_status"] for item in reversed(snapshots) if "run_status" in item),
+            None,
+        )
         return {
             "name": name,
             "filename": Path(source["filename"]).name,
             "source": source["source"],
-            "recording": [item for item in run_recording if item.get("event") != "source"],
+            "recording": snapshots,
+            "status": run_status,
         }
 
     run_payloads = [run_data(name, run) for name, run in (runs or {}).items()]
@@ -55,6 +62,8 @@ def write_html_view(
     }
     if run_payloads:
         view_data["runs"] = run_payloads
+    if start_at_end:
+        view_data["start_at_end"] = True
     payload = json.dumps(
         view_data,
         ensure_ascii=False,
