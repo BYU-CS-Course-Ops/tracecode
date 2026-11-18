@@ -64,6 +64,9 @@
     }
     #line-jump-controls[hidden] { display: none; }
     #line-jump-controls button { padding: 0 .2rem; font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #run-tabs { display: flex; justify-content: center; gap: .4rem; padding: .4rem; background: #e9edf3; }
+    #run-tabs[hidden] { display: none; }
+    #run-tabs button.active { border: 2px solid #202a44; font-weight: 700; }
     #controls { position: relative; display: flex; justify-content: center; align-items: center; gap: .45rem; flex: none; padding-top: .55rem; }
     button { padding: .35rem .7rem; }
     button:disabled { opacity: .5; }
@@ -102,6 +105,7 @@
 </head>
 <body>
   <header><h1 id="title">Trace recording</h1></header>
+  <nav id="run-tabs" aria-label="World runs" hidden></nav>
   <main>
     <section aria-label="Original source code">
       <h2>Source</h2>
@@ -131,8 +135,12 @@
   <script id="trace-data" type="application/json">__TRACE_RECORDING_JSON__</script>
   <script>
     const recordingData = JSON.parse(document.getElementById('trace-data').textContent);
-    const sourceLines = recordingData.source.split(/\r\n|\n|\r/);
-    const snapshots = recordingData.recording;
+    const runs = recordingData.runs || [recordingData];
+    let currentRunIndex = 0;
+    let currentRun = runs[0];
+    let sourceLines = currentRun.source.split(/\r\n|\n|\r/);
+    let snapshots = currentRun.recording;
+    const runIndexes = runs.map(() => 0);
     const sourceFallback = document.getElementById('source-fallback');
     const sourceEditorElement = document.getElementById('source-editor');
     const frames = document.getElementById('frames');
@@ -142,14 +150,10 @@
     const previousButton = document.getElementById('previous');
     const nextButton = document.getElementById('next');
     const lineJumpControls = document.getElementById('line-jump-controls');
+    const runTabs = document.getElementById('run-tabs');
     const jumpPreviousButton = document.getElementById('jump-previous');
     const jumpNextButton = document.getElementById('jump-next');
     const snapshotsByLine = new Map();
-    snapshots.forEach((snapshot, snapshotIndex) => {
-      if (!Number.isInteger(snapshot.lineno)) return;
-      if (!snapshotsByLine.has(snapshot.lineno)) snapshotsByLine.set(snapshot.lineno, []);
-      snapshotsByLine.get(snapshot.lineno).push(snapshotIndex);
-    });
     let hoveredLine = null;
     let index = 0;
     let highlightedLine = null;
@@ -175,6 +179,45 @@
         fragment.appendChild(row);
       });
       sourceFallback.replaceChildren(fragment);
+    }
+
+    function selectRun(runIndex) {
+      runIndexes[currentRunIndex] = index;
+      currentRunIndex = runIndex;
+      currentRun = runs[currentRunIndex];
+      sourceLines = currentRun.source.split(/\r\n|\n|\r/);
+      snapshots = currentRun.recording;
+      index = Math.min(runIndexes[currentRunIndex], Math.max(0, snapshots.length - 1));
+      snapshotsByLine.clear();
+      snapshots.forEach((snapshot, snapshotIndex) => {
+        if (!Number.isInteger(snapshot.lineno)) return;
+        if (!snapshotsByLine.has(snapshot.lineno)) snapshotsByLine.set(snapshot.lineno, []);
+        snapshotsByLine.get(snapshot.lineno).push(snapshotIndex);
+      });
+      for (const [buttonIndex, button] of [...runTabs.children].entries()) {
+        button.classList.toggle('active', buttonIndex === currentRunIndex);
+      }
+      if (codeEditor) codeEditor.setValue(currentRun.source);
+      else renderSource();
+      const hasStdout = snapshots.some(snapshot =>
+        (snapshot.console || []).some(chunk => chunk.stream === 'stdout')
+      );
+      document.getElementById('console-heading').hidden = !hasStdout;
+      consoleOutput.hidden = !hasStdout;
+      renderSnapshot();
+    }
+
+    function renderRunTabs() {
+      runTabs.replaceChildren();
+      runTabs.hidden = runs.length < 2;
+      runs.forEach((run, runIndex) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = run.name || run.filename || `Run ${runIndex + 1}`;
+        button.classList.toggle('active', runIndex === currentRunIndex);
+        button.addEventListener('click', () => selectRun(runIndex));
+        runTabs.appendChild(button);
+      });
     }
 
     function setLineClass(lineNumber, className, enabled) {
@@ -338,6 +381,20 @@
       heading.className = 'frame-heading';
       const functionName = document.createElement('code');
       functionName.textContent = frame.qualified_function;
+      if (frame.module_call) {
+        functionName.textContent = 'Module';
+        heading.appendChild(functionName);
+        card.appendChild(heading);
+        const notice = document.createElement('div');
+        notice.className = 'return-notice';
+        notice.append('Calling function ');
+        const calledFunction = document.createElement('code');
+        calledFunction.textContent = frame.function_call.qualified_function;
+        notice.append(calledFunction, '()');
+        card.appendChild(notice);
+        return card;
+      }
+
       heading.append(functionName, ` · line ${frame.lineno}`);
       card.appendChild(heading);
 
@@ -632,7 +689,7 @@
           // Keep source highlighting even if the optional stack-value highlighter fails.
         }
 
-        sourceEditorElement.value = recordingData.source;
+        sourceEditorElement.value = currentRun.source;
         codeEditor = window.CodeMirror.fromTextArea(sourceEditorElement, {
           mode: 'python',
           readOnly: true,
@@ -667,8 +724,8 @@
 
     __TRACE_PANEL_SCRIPT__
     document.getElementById('title').textContent = recordingData.filename || 'Trace recording';
-    renderSource();
-    renderSnapshot();
+    renderRunTabs();
+    selectRun(0);
     enableCodeMirror();
   </script>
 </body>

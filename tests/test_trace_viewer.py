@@ -1,5 +1,6 @@
 import json
 import re
+from pathlib import Path
 
 from tracecode import write_html_view
 
@@ -16,6 +17,37 @@ def test_console_is_hidden_without_captured_stdout_and_shown_with_stdout(tmp_pat
     assert 'id="console-output" role="log" aria-label="Console transcript" hidden' in no_output
     assert 'id="console-heading" hidden' not in with_output
     assert 'id="console-output" role="log" aria-label="Console transcript" hidden' not in with_output
+
+
+def test_viewer_renders_custom_module_call_frame_without_locals():
+    template = Path(__file__).parents[1] / "tracecode" / "trace_viewer.html"
+    html = template.read_text(encoding="utf-8")
+
+    assert "if (frame.module_call)" in html
+    assert "functionName.textContent = 'Module'" in html
+    assert "notice.append(calledFunction, '()')" in html
+
+
+def test_writes_multi_run_viewer_with_run_switcher(tmp_path):
+    source = {"event": "source", "filename": "student.py", "source": "pass\\n"}
+    runs = {
+        "World A": [source, {"event": "line", "lineno": 1, "locals": {}}],
+        "World B": [source, {"event": "return", "lineno": 1, "locals": {}}],
+    }
+    output = write_html_view(
+        runs["World A"], tmp_path / "runs.html", runs=runs
+    )
+    html = output.read_text(encoding="utf-8")
+    payload = json.loads(re.search(
+        r'<script id="trace-data" type="application/json">(.*?)</script>',
+        html,
+        re.DOTALL,
+    ).group(1))
+
+    assert [run["name"] for run in payload["runs"]] == ["World A", "World B"]
+    assert 'id="run-tabs"' in html
+    assert "function selectRun(runIndex)" in html
+    assert "currentRun.recording" in html
 
 
 def test_writes_standalone_viewer_with_optional_custom_panel(tmp_path):
@@ -131,7 +163,7 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert "inputReturnNotice" not in html
     assert "frame.call_return ? ' returned ' : ' returning '" in html
     assert "frame.exit.script} exited with exit code ${frame.exit.code}" in html
-    assert html.index("card.appendChild(variable)") < html.index("card.appendChild(notice)")
+    assert html.index("card.appendChild(variable)") < html.rindex("card.appendChild(notice)")
     assert "displayType(value)" in html and "variable.append(label, type, renderedValue)" not in html
     assert "function hasExceptionMessage(value)" in html
     assert "if (value.type !== 'opaque' || hasExceptionMessage(value))" in html

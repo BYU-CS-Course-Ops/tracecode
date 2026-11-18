@@ -18,6 +18,7 @@ def write_html_view(
     *,
     panel_title: str | None = None,
     panel_script: str | None = None,
+    runs: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
     """Write a standalone HTML viewer, optionally with an embedded custom panel."""
     if (panel_title is None) != (panel_script is None):
@@ -28,18 +29,35 @@ def write_html_view(
 
     source_record = source_records[0]
     snapshots = [record for record in recording if record.get("event") != "source"]
+
+    def run_data(name, run_recording):
+        source = next((item for item in run_recording if item.get("event") == "source"), None)
+        if source is None:
+            raise ValueError(f"Run {name!r} has no source record")
+        return {
+            "name": name,
+            "filename": Path(source["filename"]).name,
+            "source": source["source"],
+            "recording": [item for item in run_recording if item.get("event") != "source"],
+        }
+
+    run_payloads = [run_data(name, run) for name, run in (runs or {}).items()]
     has_stdout = any(
         chunk.get("stream") == "stdout"
-        for snapshot in snapshots
+        for run in (run_payloads or [{"recording": snapshots}])
+        for snapshot in run["recording"]
         for chunk in snapshot.get("console", [])
     )
     output_path = Path(output_path)
+    view_data = {
+        "filename": Path(source_record["filename"]).name,
+        "source": source_record["source"],
+        "recording": snapshots,
+    }
+    if run_payloads:
+        view_data["runs"] = run_payloads
     payload = json.dumps(
-        {
-            "filename": Path(source_record["filename"]).name,
-            "source": source_record["source"],
-            "recording": snapshots,
-        },
+        view_data,
         ensure_ascii=False,
         allow_nan=False,
     )
