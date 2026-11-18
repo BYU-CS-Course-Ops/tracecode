@@ -419,7 +419,23 @@
         notice.append('Calling function ');
         const calledFunction = document.createElement('code');
         calledFunction.textContent = frame.function_call.qualified_function;
-        notice.append(calledFunction, '()');
+        notice.append(calledFunction, '(');
+        let hasArgument = false;
+        for (const value of frame.function_call.positional_arguments || []) {
+          if (hasArgument) notice.append(', ');
+          const argument = document.createElement('code');
+          argument.textContent = formatValue(value);
+          notice.appendChild(argument);
+          hasArgument = true;
+        }
+        for (const [name, value] of Object.entries(frame.function_call.arguments || {})) {
+          if (hasArgument) notice.append(', ');
+          const argument = document.createElement('code');
+          argument.textContent = `${name}=${formatValue(value)}`;
+          notice.appendChild(argument);
+          hasArgument = true;
+        }
+        notice.append(')');
         card.appendChild(notice);
         return card;
       }
@@ -521,15 +537,12 @@
 
         const functionName = document.createElement('strong');
         const functionCode = document.createElement('code');
-        functionCode.textContent = frame.module_return
+        const isNoneReturn = returned.value.type === 'NoneType';
+        functionCode.textContent = frame.module_return || isNoneReturn
           ? `${returned.qualified_function}()`
           : returned.qualified_function;
         functionName.appendChild(functionCode);
-        const isNoneReturn = returned.value.type === 'NoneType';
-        notice.append(
-          functionName,
-          isNoneReturn ? ' returning' : frame.call_return ? ' returned ' : ' returning '
-        );
+        notice.append(functionName, frame.call_return ? ' returned ' : ' returning');
 
         if (!isNoneReturn) {
           const returnType = document.createElement('span');

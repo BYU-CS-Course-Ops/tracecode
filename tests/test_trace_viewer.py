@@ -43,12 +43,14 @@ def test_viewer_renders_custom_module_call_frame_without_locals():
 
     assert "if (frame.module_call || frame.module_return)" in html
     assert "functionName.textContent = 'Module'" in html
-    assert "notice.append(calledFunction, '()')" in html
+    assert "notice.append(calledFunction, '(')" in html
+    assert "for (const value of frame.function_call.positional_arguments || [])" in html
     assert "if (frame.module_complete)" in html
     assert "notice.textContent = frame.completion" in html
     assert "`${returned.qualified_function}()`" in html
     assert "const isNoneReturn = returned.value.type === 'NoneType'" in html
-    assert "isNoneReturn ? ' returning'" in html
+    assert "frame.module_return || isNoneReturn" in html
+    assert "frame.call_return ? ' returned ' : ' returning'" in html
     assert "if (!isNoneReturn)" in html
 
 
@@ -204,7 +206,7 @@ def test_writes_standalone_viewer_with_safely_embedded_recording(tmp_path):
     assert "frame.input_return.typed_text" in html
     assert "The user typed " in html
     assert "inputReturnNotice" not in html
-    assert "frame.call_return ? ' returned ' : ' returning '" in html
+    assert "frame.call_return ? ' returned ' : ' returning'" in html
     assert "frame.exit.script} exited with exit code ${frame.exit.code}" in html
     assert html.index("card.appendChild(variable)") < html.rindex("card.appendChild(notice)")
     assert "displayType(value)" in html and "variable.append(label, type, renderedValue)" not in html
