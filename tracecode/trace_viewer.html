@@ -199,11 +199,6 @@
       }
       if (codeEditor) codeEditor.setValue(currentRun.source);
       else renderSource();
-      const hasStdout = snapshots.some(snapshot =>
-        (snapshot.console || []).some(chunk => chunk.stream === 'stdout')
-      );
-      document.getElementById('console-heading').hidden = !hasStdout;
-      consoleOutput.hidden = !hasStdout;
       renderSnapshot();
     }
 
@@ -381,10 +376,16 @@
       heading.className = 'frame-heading';
       const functionName = document.createElement('code');
       functionName.textContent = frame.qualified_function;
-      if (frame.module_call) {
+      if (frame.module_call || frame.module_return) {
         functionName.textContent = 'Module';
         heading.appendChild(functionName);
         card.appendChild(heading);
+      } else {
+        heading.append(functionName, ` · line ${frame.lineno}`);
+        card.appendChild(heading);
+      }
+
+      if (frame.module_call) {
         const notice = document.createElement('div');
         notice.className = 'return-notice';
         notice.append('Calling function ');
@@ -395,11 +396,8 @@
         return card;
       }
 
-      heading.append(functionName, ` · line ${frame.lineno}`);
-      card.appendChild(heading);
-
       const entries = Object.entries(frame.locals || {});
-      if (entries.length === 0) {
+      if (entries.length === 0 && !frame.module_return) {
         const empty = document.createElement('div');
         empty.className = 'empty-state';
         empty.textContent = 'No local variables.';
@@ -495,7 +493,9 @@
 
         const functionName = document.createElement('strong');
         const functionCode = document.createElement('code');
-        functionCode.textContent = returned.qualified_function;
+        functionCode.textContent = frame.module_return
+          ? `${returned.qualified_function}()`
+          : returned.qualified_function;
         functionName.appendChild(functionCode);
         notice.append(functionName, frame.call_return ? ' returned ' : ' returning ');
 

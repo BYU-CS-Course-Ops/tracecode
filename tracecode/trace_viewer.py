@@ -42,11 +42,10 @@ def write_html_view(
         }
 
     run_payloads = [run_data(name, run) for name, run in (runs or {}).items()]
-    has_stdout = any(
-        chunk.get("stream") == "stdout"
+    has_console = any(
+        snapshot.get("console")
         for run in (run_payloads or [{"recording": snapshots}])
         for snapshot in run["recording"]
-        for chunk in snapshot.get("console", [])
     )
     output_path = Path(output_path)
     view_data = {
@@ -75,7 +74,7 @@ def write_html_view(
         "__TRACE_PANEL_TITLE__": "" if panel_title is None else html.escape(panel_title),
         "__TRACE_PANEL_SCRIPT__": "" if panel_script is None else panel_script,
         "__TRACE_PANEL_HIDDEN__": "hidden" if panel_title is None else "",
-        "__TRACE_CONSOLE_HIDDEN__": "" if has_stdout else "hidden",
+        "__TRACE_CONSOLE_HIDDEN__": "" if has_console else "hidden",
     }
     for marker, replacement in replacements.items():
         if marker not in template:

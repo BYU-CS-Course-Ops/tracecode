@@ -5,7 +5,7 @@ from pathlib import Path
 from tracecode import write_html_view
 
 
-def test_console_is_hidden_without_captured_stdout_and_shown_with_stdout(tmp_path):
+def test_console_is_hidden_without_recorded_io_and_shown_with_stdout(tmp_path):
     source = {"event": "source", "filename": "student.py", "source": ""}
     no_output = write_html_view([source], tmp_path / "silent.html").read_text()
     with_output = write_html_view(
@@ -19,13 +19,32 @@ def test_console_is_hidden_without_captured_stdout_and_shown_with_stdout(tmp_pat
     assert 'id="console-output" role="log" aria-label="Console transcript" hidden' not in with_output
 
 
+def test_console_is_visible_for_stdin_and_stays_visible_across_all_runs(tmp_path):
+    source = {"event": "source", "filename": "student.py", "source": ""}
+    runs = {
+        "Quiet": [source, {"event": "line", "locals": {}}],
+        "Input": [
+            source,
+            {"event": "line", "console": [{"stream": "stdin", "text": "answer\\n"}]},
+        ],
+    }
+    html = write_html_view(
+        runs["Quiet"], tmp_path / "stdin.html", runs=runs
+    ).read_text()
+
+    assert 'id="console-heading" hidden' not in html
+    assert 'id="console-output" role="log" aria-label="Console transcript" hidden' not in html
+    assert "consoleOutput.hidden" not in html
+
+
 def test_viewer_renders_custom_module_call_frame_without_locals():
     template = Path(__file__).parents[1] / "tracecode" / "trace_viewer.html"
     html = template.read_text(encoding="utf-8")
 
-    assert "if (frame.module_call)" in html
+    assert "if (frame.module_call || frame.module_return)" in html
     assert "functionName.textContent = 'Module'" in html
     assert "notice.append(calledFunction, '()')" in html
+    assert "`${returned.qualified_function}()`" in html
 
 
 def test_writes_multi_run_viewer_with_run_switcher(tmp_path):
