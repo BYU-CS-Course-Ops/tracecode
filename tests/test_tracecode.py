@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from tracecode import RecordingLimitExceeded, TraceRecorder, prepare_file
+from tracecode import RecordingLimitExceeded, SetTraceRecorder, TraceRecorder, prepare_file
 
 
 def load_function(tmp_path, source, name="run", namespace=None):
@@ -36,7 +36,7 @@ def decode_mapping(value):
 
 
 def record_function(func, filename, **options):
-    recorder = TraceRecorder(target_file=str(filename), **options)
+    recorder = SetTraceRecorder(target_file=str(filename), **options)
     with recorder:
         result = func()
     return result, recorder.recording
@@ -200,7 +200,7 @@ def test_displays_sys_argv_as_a_module_local_when_source_uses_it(tmp_path, monke
     filename = tmp_path / "arguments.py"
     filename.write_text(source)
     monkeypatch.setattr(sys, "argv", [str(filename), "Gordon"])
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     with recorder:
         exec(compile(source, str(filename), "exec"), {})
@@ -397,7 +397,7 @@ def test_external_return_captures_custom_serialized_caller_state(tmp_path):
         "def run(state):\n    result = update(state)\n    return result\n",
         namespace=external_namespace,
     )
-    recorder = TraceRecorder(
+    recorder = SetTraceRecorder(
         [(State, lambda state: {"value": state.value})], target_file=str(filename)
     )
 
@@ -434,7 +434,7 @@ def test_external_raises_generators_and_input_do_not_create_general_return_event
         namespace=external_namespace,
     )
     monkeypatch.setattr(sys, "stdin", io.StringIO("answer\n"))
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     with recorder:
         func()
@@ -526,7 +526,7 @@ def test_captures_stdout_and_echoed_stdin_as_console_deltas(tmp_path, monkeypatc
         "    print(f'Hello {name}')\n",
     )
     monkeypatch.setattr(sys, "stdin", io.StringIO("Ada\n"))
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     with recorder:
         func()
@@ -564,7 +564,7 @@ def test_input_prompt_is_recorded_when_stdin_reaches_eof(tmp_path, monkeypatch):
         "    input('Enter your name: ')\n",
     )
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     with pytest.raises(EOFError):
         with recorder:
@@ -584,7 +584,7 @@ def test_console_capture_respects_character_limit(tmp_path, capsys):
         "def run():\n"
         "    print('abcdef')\n",
     )
-    recorder = TraceRecorder(target_file=str(filename), max_console_chars=3)
+    recorder = SetTraceRecorder(target_file=str(filename), max_console_chars=3)
 
     with recorder:
         func()
@@ -611,7 +611,7 @@ def test_exception_traceback_grows_outward_as_exception_unwinds(tmp_path):
         name="outer",
         namespace={},
     )
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     with pytest.raises(ValueError, match="bad input"):
         with recorder:
@@ -650,7 +650,7 @@ def test_traceback_includes_frame_that_started_recording(tmp_path):
     filename.write_text(source)
     namespace = {}
     exec(compile(source, str(filename), "exec"), namespace)
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     namespace["run"](recorder)
 
@@ -673,7 +673,7 @@ def test_records_only_frames_from_target_file(tmp_path):
         name="wrapper",
         namespace={"target": target},
     )
-    recorder = TraceRecorder(target_file=str(target_file))
+    recorder = SetTraceRecorder(target_file=str(target_file))
 
     with recorder:
         assert wrapper() == 42
@@ -698,7 +698,7 @@ def test_custom_serializers_use_first_match_and_copy_output(tmp_path):
         "    return value\n",
     )
     value = Child()
-    recorder = TraceRecorder(
+    recorder = SetTraceRecorder(
         [
             (
                 Parent,
@@ -728,7 +728,7 @@ def test_opaque_values_do_not_call_repr(tmp_path):
             raise AssertionError("repr must not be called")
 
     func, filename = load_function(tmp_path, "def run(value):\n    return value\n")
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     with recorder:
         func(Opaque())
@@ -756,7 +756,7 @@ def test_limits_raise_and_preserve_recorded_snapshots(tmp_path, options, expecte
         "    value = [1]\n"
         "    return value\n",
     )
-    recorder = TraceRecorder(target_file=str(filename), **options)
+    recorder = SetTraceRecorder(target_file=str(filename), **options)
     previous_trace = sys.gettrace()
 
     with pytest.raises(RecordingLimitExceeded):
@@ -779,7 +779,7 @@ def test_user_can_catch_limit_error_and_get_partial_snapshots(tmp_path):
         "        return 'handled'\n",
         namespace=namespace,
     )
-    recorder = TraceRecorder(target_file=str(filename), max_snapshots=1)
+    recorder = SetTraceRecorder(target_file=str(filename), max_snapshots=1)
     previous_trace = sys.gettrace()
 
     with recorder:
@@ -806,7 +806,7 @@ def test_restores_previous_trace_when_limit_is_caught(tmp_path):
     def existing_trace(frame, event, arg):
         return existing_trace
 
-    recorder = TraceRecorder(target_file=str(filename), max_snapshots=1)
+    recorder = SetTraceRecorder(target_file=str(filename), max_snapshots=1)
     try:
         sys.settrace(existing_trace)
         with recorder:
@@ -824,7 +824,7 @@ def test_serializer_error_propagates_and_restores_trace(tmp_path):
         raise LookupError("serializer failed")
 
     func, filename = load_function(tmp_path, "def run(value):\n    return value\n")
-    recorder = TraceRecorder([(Value, broken_serializer)], target_file=str(filename))
+    recorder = SetTraceRecorder([(Value, broken_serializer)], target_file=str(filename))
     previous_trace = sys.gettrace()
     previous_stdout = sys.stdout
     previous_stdin = sys.stdin
@@ -840,10 +840,10 @@ def test_serializer_error_propagates_and_restores_trace(tmp_path):
 
 def test_invalid_limits_are_rejected():
     with pytest.raises(ValueError):
-        TraceRecorder(max_snapshots=0)
+        SetTraceRecorder(max_snapshots=0)
     with pytest.raises(ValueError):
-        TraceRecorder(max_depth=-1)
+        SetTraceRecorder(max_depth=-1)
     with pytest.raises(ValueError):
-        TraceRecorder(max_items=0)
+        SetTraceRecorder(max_items=0)
     with pytest.raises(ValueError):
-        TraceRecorder(max_console_chars=0)
+        SetTraceRecorder(max_console_chars=0)

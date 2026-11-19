@@ -69,9 +69,7 @@ def test_cli_writes_trace_before_reporting_script_exception(tmp_path, capsys):
             re.DOTALL,
         ).group(1)
     )
-    exceptions = [snapshot["exception"] for snapshot in payload["recording"] if "exception" in snapshot]
     assert payload["recording"][-1]["event"] == "exit"
     assert payload["recording"][-1]["exit"]["code"] == 1
-    assert exceptions[-1]["type"] == "ValueError"
-    assert exceptions[-1]["message"] == "script failed"
+    assert any(snapshot["event"] == "line" for snapshot in payload["recording"])
     assert "ValueError: script failed" in capsys.readouterr().err

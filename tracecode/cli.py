@@ -6,7 +6,8 @@ import traceback
 import types
 from pathlib import Path
 
-from .code_tracer import TraceRecorder, prepare_file
+from .ast_tracer import TraceRecorder
+from .code_tracer import prepare_file
 from .trace_viewer import write_html_view
 
 

@@ -60,9 +60,10 @@ with TraceRecorder(target_file=path) as recorder:
     result = namespace["solve"](argument)
 ```
 
-Instrumented condition and call hooks are transparent outside an active recorder.
-The CLI uses the same prepared source but executes the module inside the recording
-context, so it continues to record the whole script. See
+`TraceRecorder` uses AST hooks and does not install `sys.settrace`. The CLI uses
+`prepare_file()` and executes the module inside the recording context, so it
+records the whole script. `SetTraceRecorder` remains available for the legacy
+interpreter-tracing implementation. See
 `.agents/scratch/function_capture_demo.py` for a runnable selective-recording demo.
 
 

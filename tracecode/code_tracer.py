@@ -73,7 +73,7 @@ class _ConditionInstrumenter(ast.NodeTransformer):
 
 
 class _CallProxy:
-    def __init__(self, recorder: TraceRecorder, function: Any, source_name: str):
+    def __init__(self, recorder: SetTraceRecorder, function: Any, source_name: str):
         self._recorder = recorder
         self._function = function
         self._source_name = source_name
@@ -194,13 +194,21 @@ class PreparedSource:
 
 
 def prepare_file(filename: str | os.PathLike[str]) -> PreparedSource:
-    """Read, instrument, and compile a Python file without executing it."""
-    path = os.path.realpath(os.fspath(filename))
-    with tokenize.open(path) as source_file:
-        return PreparedSource(source_file.read(), path)
+    """Read and AST-instrument a Python file without executing it."""
+    from .ast_tracer import prepare_ast_file
+
+    return prepare_ast_file(filename)
 
 
-class TraceRecorder:
+def __getattr__(name: str):
+    if name == "TraceRecorder":
+        from .ast_tracer import TraceRecorder
+
+        return TraceRecorder
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+class SetTraceRecorder:
     """Record execution snapshots and console deltas for one Python source file."""
 
     def __init__(
@@ -245,9 +253,9 @@ class TraceRecorder:
     def recording(self) -> list[dict[str, Any]]:
         return self._recording
 
-    def __enter__(self) -> TraceRecorder:
+    def __enter__(self) -> SetTraceRecorder:
         if self._active:
-            raise RuntimeError("TraceRecorder is already active")
+            raise RuntimeError("SetTraceRecorder is already active")
         caller = inspect.currentframe().f_back
         if self._target_file is None:
             if caller is None:
@@ -306,7 +314,7 @@ class TraceRecorder:
     def _make_call_proxy(self, function: Any, source_name: str) -> Any:
         if inspect.isfunction(function):
             return function
-        if inspect.ismethod(function) and function.__func__ is not TraceRecorder._recording_input:
+        if inspect.ismethod(function) and function.__func__ is not SetTraceRecorder._recording_input:
             return function
         return _CallProxy(self, function, source_name)
 
@@ -390,9 +398,9 @@ class TraceRecorder:
             caller = frame.f_back
             is_importlib_frame = frame.f_globals.get("__name__", "").startswith("importlib.")
             is_trace_helper = frame.f_code in (
-                TraceRecorder._recording_input.__code__,
-                TraceRecorder._record_condition.__code__,
-                TraceRecorder._make_call_proxy.__code__,
+                SetTraceRecorder._recording_input.__code__,
+                SetTraceRecorder._record_condition.__code__,
+                SetTraceRecorder._make_call_proxy.__code__,
                 _CallProxy.__call__.__code__,
                 _TeeTextStream.write.__code__,
                 _active_call_proxy.__code__,
