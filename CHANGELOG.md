@@ -1,3 +1,9 @@
+## 0.1.2
+
+- `tracecode` now uses exclusively AST hooks instead of `settrace`; this resulted in a 20x speedup in runtime for code with calls to external libraries. 
+- UI hooks for custom panels (used by the `byubit` project)
+- Various UI refinements
+
 ## 0.1.1
 
 Initial release!
