@@ -7,6 +7,8 @@ import linecache
 import os
 import sys
 import tokenize
+import uuid
+from contextvars import ContextVar
 from types import TracebackType
 from typing import Any, Callable, Protocol
 
@@ -17,6 +19,29 @@ class Serializer(Protocol):
 
 class RecordingLimitExceeded(RuntimeError):
     """Raised when a recording exceeds a configured snapshot or value limit."""
+
+
+class _CallInstrumenter(ast.NodeTransformer):
+    def __init__(self, helper_name: str, source: str):
+        self.helper_name = helper_name
+        self.source = source
+
+    def visit_Call(self, node: ast.Call):
+        self.generic_visit(node)
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id in {"super", "locals", "vars", "globals", "eval", "exec"}
+        ):
+            # These builtins depend on the caller frame; a wrapper would change semantics.
+            return node
+        source_name = ast.get_source_segment(self.source, node.func) or "function"
+        proxy = ast.Call(
+            func=ast.Name(id=self.helper_name, ctx=ast.Load()),
+            args=[node.func, ast.Constant(source_name)],
+            keywords=[],
+        )
+        wrapped = ast.Call(func=proxy, args=node.args, keywords=node.keywords)
+        return ast.copy_location(wrapped, node)
 
 
 class _ConditionInstrumenter(ast.NodeTransformer):
@@ -45,6 +70,31 @@ class _ConditionInstrumenter(ast.NodeTransformer):
         self.generic_visit(node)
         node.test = self._wrap(node.test, "while")
         return node
+
+
+class _CallProxy:
+    def __init__(self, recorder: SetTraceRecorder, function: Any, source_name: str):
+        self._recorder = recorder
+        self._function = function
+        self._source_name = source_name
+
+    def __call__(self, *args, **kwargs):
+        recorder = self._recorder
+        caller = inspect.currentframe().f_back
+        if (
+            recorder._active
+            and caller is not None
+            and os.path.realpath(caller.f_code.co_filename) == recorder._target_file
+        ):
+            recorder._record_call(caller, self._source_name, args, kwargs)
+        value = self._function(*args, **kwargs)
+        if (
+            recorder._active
+            and caller is not None
+            and os.path.realpath(caller.f_code.co_filename) == recorder._target_file
+        ):
+            recorder._record_call_return(caller, self._source_name, value)
+        return value
 
 
 class _TeeTextStream:
@@ -94,7 +144,71 @@ class _RecordingInputStream:
         return getattr(self._stream, name)
 
 
-class TraceRecorder:
+_ACTIVE_RECORDER: ContextVar[Any | None] = ContextVar("tracecode_active_recorder", default=None)
+
+
+def _active_call_proxy(function: Any, source_name: str) -> Any:
+    recorder = _ACTIVE_RECORDER.get()
+    if recorder is None or not recorder._active:
+        return function
+    return recorder._make_call_proxy(function, source_name)
+
+
+def _active_record_condition(value: Any, kind: str, source: str) -> bool:
+    recorder = _ACTIVE_RECORDER.get()
+    if recorder is None or not recorder._active:
+        return bool(value)
+    caller = inspect.currentframe().f_back
+    return recorder._record_condition(value, kind, source, frame=caller)
+
+
+class PreparedSource:
+    """An instrumented source file that can be executed in any namespace."""
+
+    def __init__(self, source: str, filename: str):
+        self.source = source
+        self.filename = os.path.realpath(filename)
+        syntax_tree = ast.parse(source, filename=self.filename)
+        names = {
+            node.id for node in ast.walk(syntax_tree) if isinstance(node, ast.Name)
+        }
+        suffix = uuid.uuid4().hex
+        self.call_helper_name = f"__tracecode_call_{suffix}__"
+        self.condition_helper_name = f"__tracecode_condition_{suffix}__"
+        while self.call_helper_name in names or self.condition_helper_name in names:
+            suffix = uuid.uuid4().hex
+            self.call_helper_name = f"__tracecode_call_{suffix}__"
+            self.condition_helper_name = f"__tracecode_condition_{suffix}__"
+        syntax_tree = _CallInstrumenter(self.call_helper_name, source).visit(syntax_tree)
+        syntax_tree = _ConditionInstrumenter(self.condition_helper_name, source).visit(syntax_tree)
+        ast.fix_missing_locations(syntax_tree)
+        self._code = compile(syntax_tree, self.filename, "exec", dont_inherit=True)
+
+    def execute(self, namespace: dict[str, Any]) -> None:
+        """Execute in a namespace; recording occurs only if a recorder is active."""
+        if self.call_helper_name in namespace or self.condition_helper_name in namespace:
+            raise RuntimeError("Prepared source helper name collides with its namespace")
+        namespace[self.call_helper_name] = _active_call_proxy
+        namespace[self.condition_helper_name] = _active_record_condition
+        exec(self._code, namespace)  # noqa: S102 - execute prepared student source
+
+
+def prepare_file(filename: str | os.PathLike[str]) -> PreparedSource:
+    """Read and AST-instrument a Python file without executing it."""
+    from .ast_tracer import prepare_ast_file
+
+    return prepare_ast_file(filename)
+
+
+def __getattr__(name: str):
+    if name == "TraceRecorder":
+        from .ast_tracer import TraceRecorder
+
+        return TraceRecorder
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+class SetTraceRecorder:
     """Record execution snapshots and console deltas for one Python source file."""
 
     def __init__(
@@ -119,6 +233,7 @@ class TraceRecorder:
         self._target_frame = None
         self._previous_target_frame_trace = None
         self._active = False
+        self._context_token = None
         self._recording: list[dict[str, Any]] = []
         self._snapshot_count = 0
         self._source_lines: list[str] = []
@@ -138,9 +253,9 @@ class TraceRecorder:
     def recording(self) -> list[dict[str, Any]]:
         return self._recording
 
-    def __enter__(self) -> TraceRecorder:
+    def __enter__(self) -> SetTraceRecorder:
         if self._active:
-            raise RuntimeError("TraceRecorder is already active")
+            raise RuntimeError("SetTraceRecorder is already active")
         caller = inspect.currentframe().f_back
         if self._target_file is None:
             if caller is None:
@@ -190,34 +305,41 @@ class TraceRecorder:
             sys.stdin = _RecordingInputStream(self._previous_stdin, self._record_console)
         builtins.input = self._recording_input
         self._active = True
+        self._context_token = _ACTIVE_RECORDER.set(self)
         sys.settrace(self._trace)
         if self._target_frame is not None:
             self._target_frame.f_trace = self._trace
         return self
 
-    def exec_source(self, namespace: dict[str, Any]):
-        """Execute this recorder's source after instrumenting if/elif/while tests."""
-        if not self._active:
-            raise RuntimeError("TraceRecorder must be active to execute source")
-        syntax_tree = ast.parse(self._source, filename=self._target_file)
-        names = {
-            node.id
-            for node in ast.walk(syntax_tree)
-            if isinstance(node, ast.Name)
-        }
-        helper_name = "__tracecode_record_condition__"
-        while helper_name in names or helper_name in namespace:
-            helper_name += "_"
-        self._condition_helper_name = helper_name
-        namespace[helper_name] = self._record_condition
-        syntax_tree = _ConditionInstrumenter(helper_name, self._source).visit(syntax_tree)
-        ast.fix_missing_locations(syntax_tree)
-        code = compile(syntax_tree, self._target_file, "exec", dont_inherit=True)
-        exec(code, namespace)
+    def _make_call_proxy(self, function: Any, source_name: str) -> Any:
+        if inspect.isfunction(function):
+            return function
+        if inspect.ismethod(function) and function.__func__ is not SetTraceRecorder._recording_input:
+            return function
+        return _CallProxy(self, function, source_name)
 
-    def _record_condition(self, value: Any, kind: str, source: str) -> bool:
+    def _record_call(self, frame, source_name: str, args: tuple[Any, ...], kwargs: dict[str, Any]):
+        self._record_snapshot(
+            frame,
+            "call",
+            {
+                "qualified_function": source_name,
+                "positional_arguments": args,
+                "keyword_arguments": kwargs,
+            },
+        )
+
+    def _record_call_return(self, frame, source_name: str, value: Any):
+        self._record_snapshot(
+            frame,
+            "call_return",
+            {"qualified_function": source_name, "value": value},
+        )
+
+    def _record_condition(self, value: Any, kind: str, source: str, frame=None) -> bool:
         result = bool(value)
-        frame = inspect.currentframe().f_back
+        if frame is None:
+            frame = inspect.currentframe().f_back
         if (
             self._active
             and frame is not None
@@ -237,6 +359,9 @@ class TraceRecorder:
         exc_tb: TracebackType | None,
     ) -> bool:
         self._stop_tracing()
+        if self._context_token is not None:
+            _ACTIVE_RECORDER.reset(self._context_token)
+            self._context_token = None
         self._previous_trace = None
         return False
 
@@ -259,8 +384,6 @@ class TraceRecorder:
         if not self._active:
             return None
         try:
-            if os.path.realpath(frame.f_code.co_filename) != self._target_file:
-                return self._trace
             frame_id = id(frame)
             if event == "line":
                 self._unwinding_frames.discard(frame_id)
@@ -270,10 +393,52 @@ class TraceRecorder:
                 # The preceding exception snapshot already represents this frame's unwind.
                 self._unwinding_frames.discard(frame_id)
                 return self._trace
+
+            is_target_frame = os.path.realpath(frame.f_code.co_filename) == self._target_file
             caller = frame.f_back
-            # The line snapshot precedes expression evaluation; this call snapshot
-            # follows argument evaluation. Keep both because arguments can have
-            # side effects and one source line can contain nested or multiple calls.
+            is_importlib_frame = frame.f_globals.get("__name__", "").startswith("importlib.")
+            is_trace_helper = frame.f_code in (
+                SetTraceRecorder._recording_input.__code__,
+                SetTraceRecorder._record_condition.__code__,
+                SetTraceRecorder._make_call_proxy.__code__,
+                _CallProxy.__call__.__code__,
+                _TeeTextStream.write.__code__,
+                _active_call_proxy.__code__,
+                _active_record_condition.__code__,
+            )
+            is_generator = bool(
+                frame.f_code.co_flags
+                & (
+                    inspect.CO_GENERATOR
+                    | inspect.CO_COROUTINE
+                    | inspect.CO_ASYNC_GENERATOR
+                )
+            )
+            is_direct_target_call = (
+                caller is not None
+                and os.path.realpath(caller.f_code.co_filename) == self._target_file
+            )
+            if (
+                not is_target_frame
+                and event == "call"
+                and is_direct_target_call
+                and not is_trace_helper
+                and not is_importlib_frame
+            ):
+                self._record_snapshot(caller, "call", frame)
+            if (
+                not is_target_frame
+                and event == "return"
+                and is_direct_target_call
+                and not is_generator
+                and not is_trace_helper
+                and not is_importlib_frame
+            ):
+                self._record_snapshot(caller, "call_return", (frame, arg))
+            if not is_target_frame:
+                return self._trace
+            # Python calls are captured at frame entry; C-callable objects are
+            # captured by the AST-installed proxy.
             if (
                 event == "call"
                 and caller is not None
@@ -295,6 +460,8 @@ class TraceRecorder:
 
     def _recording_input(self, prompt: str = "") -> str:
         caller = inspect.currentframe().f_back
+        if caller is not None and caller.f_code is _CallProxy.__call__.__code__:
+            caller = caller.f_back
         records_input = (
             caller is not None
             and os.path.realpath(caller.f_code.co_filename) == self._target_file
@@ -356,17 +523,7 @@ class TraceRecorder:
             "function": frame.f_code.co_name,
             "qualified_function": frame.f_code.co_qualname,
         }
-        local_values = self._visible_values(frame.f_locals)
-        if frame.f_code.co_name == "<module>":
-            # At module scope locals and globals are the same mapping.
-            if self._uses_sys_argv and frame.f_globals.get("sys") is sys:
-                local_values["sys.argv"] = sys.argv
-            snapshot["locals"] = self._serialize_scope(local_values, budget)
-        else:
-            snapshot["locals"] = self._serialize_scope(local_values, budget)
-            snapshot["globals"] = self._serialize_scope(
-                self._visible_values(frame.f_globals), budget
-            )
+        snapshot["locals"] = self._serialize_scope(self._frame_locals(frame), budget)
         snapshot["callers"] = self._capture_callers(frame.f_back, budget)
         if console_delta:
             snapshot["console"] = console_delta
@@ -382,10 +539,17 @@ class TraceRecorder:
                 "traceback": self._capture_traceback(traceback),
             }
         elif event == "call_return":
-            returned_frame, value = arg
+            if isinstance(arg, dict):
+                function_name = arg["qualified_function"]
+                qualified_function = function_name
+                value = arg["value"]
+            else:
+                returned_frame, value = arg
+                function_name = returned_frame.f_code.co_name
+                qualified_function = returned_frame.f_code.co_qualname
             snapshot["call_return"] = {
-                "function": returned_frame.f_code.co_name,
-                "qualified_function": returned_frame.f_code.co_qualname,
+                "function": function_name,
+                "qualified_function": qualified_function,
                 "value": self._serialize(value, 0, budget),
             }
         elif event == "input_prompt":
@@ -402,12 +566,22 @@ class TraceRecorder:
                 "value": self._serialize(arg, 0, budget),
             }
         elif event == "call":
-            snapshot["function_call"] = {
-                "qualified_function": arg.f_code.co_qualname,
-                "arguments": self._serialize_scope(
-                    self._visible_values(arg.f_locals), budget
-                ),
-            }
+            if isinstance(arg, dict):
+                snapshot["function_call"] = {
+                    "qualified_function": arg["qualified_function"],
+                    "arguments": self._serialize_scope(arg["keyword_arguments"], budget),
+                    "positional_arguments": [
+                        self._serialize(value, 0, budget)
+                        for value in arg["positional_arguments"]
+                    ],
+                }
+            else:
+                snapshot["function_call"] = {
+                    "qualified_function": arg.f_code.co_qualname,
+                    "arguments": self._serialize_scope(
+                        self._visible_values(arg.f_locals), budget
+                    ),
+                }
         return snapshot
 
     def _exception_message(self, exception: BaseException) -> str:
@@ -449,18 +623,13 @@ class TraceRecorder:
     def _capture_callers(self, frame, budget: list[int]) -> list[dict[str, Any]]:
         callers = []
         while frame is not None:
-            if (
-                frame.f_code.co_name != "<module>"
-                and os.path.realpath(frame.f_code.co_filename) == self._target_file
-            ):
+            if os.path.realpath(frame.f_code.co_filename) == self._target_file:
                 callers.append(
                     {
                         "function": frame.f_code.co_name,
                         "qualified_function": frame.f_code.co_qualname,
                         "lineno": frame.f_lineno,
-                        "locals": self._serialize_scope(
-                            self._visible_values(frame.f_locals), budget
-                        ),
+                        "locals": self._serialize_scope(self._frame_locals(frame), budget),
                     }
                 )
             frame = frame.f_back
@@ -468,6 +637,16 @@ class TraceRecorder:
 
     def _serialize_scope(self, values: dict[str, Any], budget: list[int]) -> dict[str, Any]:
         return {name: self._serialize(value, 0, budget) for name, value in values.items()}
+
+    def _frame_locals(self, frame) -> dict[str, Any]:
+        values = self._visible_values(frame.f_locals)
+        if (
+            frame.f_code.co_name == "<module>"
+            and self._uses_sys_argv
+            and frame.f_globals.get("sys") is sys
+        ):
+            values["sys.argv"] = sys.argv
+        return values
 
     def _visible_values(self, values: dict[str, Any]) -> dict[str, Any]:
         return {

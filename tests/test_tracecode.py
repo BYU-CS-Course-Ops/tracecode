@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from tracecode import RecordingLimitExceeded, TraceRecorder
+from tracecode import RecordingLimitExceeded, SetTraceRecorder, TraceRecorder, prepare_file
 
 
 def load_function(tmp_path, source, name="run", namespace=None):
@@ -36,10 +36,46 @@ def decode_mapping(value):
 
 
 def record_function(func, filename, **options):
-    recorder = TraceRecorder(target_file=str(filename), **options)
+    recorder = SetTraceRecorder(target_file=str(filename), **options)
     with recorder:
         result = func()
     return result, recorder.recording
+
+
+def test_prepared_module_can_load_unrecorded_then_record_one_function(tmp_path):
+    filename = tmp_path / "student.py"
+    filename.write_text(
+        "module_setup = 'completed'\n"
+        "def helper(value):\n"
+        "    return value * 2\n"
+        "def run(value):\n"
+        "    if value > 1:\n"
+        "        return helper(value)\n"
+        "    return 0\n"
+    )
+    prepared = prepare_file(filename)
+    namespace = {"__name__": "_student_load", "__file__": str(filename)}
+    assert "module_setup" not in namespace
+    prepared.execute(namespace)
+    assert namespace["module_setup"] == "completed"
+    assert namespace["run"](1) == 0  # Instrumentation is transparent without a recorder.
+
+    recorder = TraceRecorder(target_file=str(filename))
+    with recorder:
+        result = namespace["run"](3)
+
+    assert result == 6
+    assert not any(
+        snapshot["event"] == "line" and snapshot["function"] == "<module>"
+        for snapshot in recorder.recording
+    )
+    assert any(
+        snapshot.get("function") == "run" for snapshot in recorder.recording
+    )
+    assert any(
+        snapshot.get("function") == "helper" for snapshot in recorder.recording
+    )
+    assert any(snapshot["event"] == "condition" for snapshot in recorder.recording)
 
 
 def test_line_snapshots_capture_state_before_each_line(tmp_path):
@@ -64,6 +100,50 @@ def test_line_snapshots_capture_state_before_each_line(tmp_path):
     assert recording[-1]["return"] == {"value": {"type": "int", "data": 2}}
 
 
+def test_prepared_source_records_python_and_builtin_calls_with_arguments_and_results(
+    tmp_path, monkeypatch
+):
+    source = (
+        "def run():\n"
+        "    text = input('value? ')\n"
+        "    number = int(text)\n"
+        "    return number\n"
+        "result = run()\n"
+    )
+    filename = tmp_path / "calls.py"
+    filename.write_text(source)
+    monkeypatch.setattr(sys, "stdin", io.StringIO("42\n"))
+    recorder = TraceRecorder(target_file=str(filename))
+    prepared = prepare_file(filename)
+    namespace = {"__name__": "__main__", "__file__": str(filename)}
+
+    with recorder:
+        prepared.execute(namespace)
+
+    assert namespace["result"] == 42
+    calls = [item for item in recorder.recording if item["event"] == "call"]
+    assert [item["function_call"]["qualified_function"] for item in calls] == [
+        "run", "input", "int"
+    ]
+    assert calls[1]["function_call"]["positional_arguments"] == [
+        {"type": "str", "data": "value? "}
+    ]
+    assert calls[2]["function_call"]["positional_arguments"] == [
+        {"type": "str", "data": "42"}
+    ]
+    returned = [item for item in recorder.recording if item["event"] == "call_return"]
+    assert [item["call_return"]["qualified_function"] for item in returned] == [
+        "input", "int", "run"
+    ]
+    assert [item["call_return"]["value"] for item in returned[:2]] == [
+        {"type": "str", "data": "42"},
+        {"type": "int", "data": 42},
+    ]
+    assert [item["event"] for item in recorder.recording if item["event"].startswith("input_")] == [
+        "input_prompt", "input_return"
+    ]
+
+
 def test_records_if_elif_and_each_while_condition_without_helper_frames(tmp_path):
     source = (
         "def run():\n"
@@ -80,9 +160,10 @@ def test_records_if_elif_and_each_while_condition_without_helper_frames(tmp_path
     filename.write_text(source)
     namespace = {"__name__": "__main__", "__file__": str(filename)}
     recorder = TraceRecorder(target_file=str(filename))
+    prepared = prepare_file(filename)
 
     with recorder:
-        recorder.exec_source(namespace)
+        prepared.execute(namespace)
 
     conditions = [
         snapshot for snapshot in recorder.recording if snapshot["event"] == "condition"
@@ -97,14 +178,20 @@ def test_records_if_elif_and_each_while_condition_without_helper_frames(tmp_path
         "while", "if", "while", "if", "if", "while"
     ]
     assert all(snapshot["function"] == "run" for snapshot in conditions)
+    assert all("globals" not in snapshot for snapshot in recorder.recording)
     assert all(
-        "tracecode_record_condition" not in repr(snapshot.get("globals", {}))
+        snapshot["callers"][-1]["function"] == "<module>"
         for snapshot in conditions
     )
+    assert "run" in decode_mapping(conditions[0]["callers"][-1]["locals"])
     assert all(
         caller["function"] != "_record_condition"
         for snapshot in conditions
         for caller in snapshot["callers"]
+    )
+    assert not any(
+        snapshot.get("call_return", {}).get("function") == "_record_condition"
+        for snapshot in recorder.recording
     )
 
 
@@ -113,7 +200,7 @@ def test_displays_sys_argv_as_a_module_local_when_source_uses_it(tmp_path, monke
     filename = tmp_path / "arguments.py"
     filename.write_text(source)
     monkeypatch.setattr(sys, "argv", [str(filename), "Gordon"])
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     with recorder:
         exec(compile(source, str(filename), "exec"), {})
@@ -247,6 +334,118 @@ def test_function_return_records_return_site_and_call_site(tmp_path):
     }
 
 
+def test_external_python_returns_are_recorded_at_the_target_boundary(tmp_path):
+    external_file = tmp_path / "external.py"
+    external_source = (
+        "def inner():\n"
+        "    return 3\n"
+        "def outer():\n"
+        "    value = inner()\n"
+        "    return value + 1\n"
+        "def direct():\n"
+        "    return 9\n"
+    )
+    external_file.write_text(external_source)
+    external_namespace = {}
+    exec(compile(external_source, str(external_file), "exec"), external_namespace)
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    first = outer(); second = direct()\n"
+        "    return first, second\n",
+        namespace=external_namespace,
+    )
+
+    result, recording = record_function(func, filename)
+
+    assert result == (4, 9)
+    calls = [snapshot for snapshot in recording if snapshot["event"] == "call"]
+    assert [item["function_call"]["qualified_function"] for item in calls] == [
+        "outer", "direct"
+    ]
+    assert all(item["function"] == "run" and item["lineno"] == 2 for item in calls)
+    assert [item["function_call"]["arguments"] for item in calls] == [{}, {}]
+    returns = [snapshot for snapshot in recording if snapshot["event"] == "call_return"]
+    assert [(item["call_return"]["function"], item["call_return"]["value"]) for item in returns] == [
+        ("outer", {"type": "int", "data": 4}),
+        ("direct", {"type": "int", "data": 9}),
+    ]
+    assert all(item["function"] == "run" and item["lineno"] == 2 for item in returns)
+    assert all(item["filename"] == str(filename) for item in returns)
+    assert [item["call_return"]["qualified_function"] for item in returns] == [
+        "outer", "direct"
+    ]
+    assert "first" not in decode_mapping(returns[0]["locals"])
+    assert not any(
+        item["event"] == "call_return" and item["call_return"]["function"] == "inner"
+        for item in recording
+    )
+
+
+def test_external_return_captures_custom_serialized_caller_state(tmp_path):
+    class State:
+        def __init__(self):
+            self.value = 0
+
+    external_file = tmp_path / "external.py"
+    external_source = "def update(state):\n    state.value = 5\n    return state.value\n"
+    external_file.write_text(external_source)
+    external_namespace = {}
+    exec(compile(external_source, str(external_file), "exec"), external_namespace)
+    func, filename = load_function(
+        tmp_path,
+        "def run(state):\n    result = update(state)\n    return result\n",
+        namespace=external_namespace,
+    )
+    recorder = SetTraceRecorder(
+        [(State, lambda state: {"value": state.value})], target_file=str(filename)
+    )
+
+    with recorder:
+        func(State())
+
+    returned = next(item for item in recorder.recording if item["event"] == "call_return")
+    assert returned["call_return"]["value"] == {"type": "int", "data": 5}
+    assert decode_mapping(returned["locals"])["state"] == {"value": 5}
+
+
+def test_external_raises_generators_and_input_do_not_create_general_return_events(
+    tmp_path, monkeypatch
+):
+    external_file = tmp_path / "external.py"
+    external_source = (
+        "def fail():\n"
+        "    raise ValueError('failed')\n"
+        "def generate():\n"
+        "    yield 1\n"
+    )
+    external_file.write_text(external_source)
+    external_namespace = {}
+    exec(compile(external_source, str(external_file), "exec"), external_namespace)
+    func, filename = load_function(
+        tmp_path,
+        "def run():\n"
+        "    try:\n"
+        "        fail()\n"
+        "    except ValueError:\n"
+        "        pass\n"
+        "    next(generate())\n"
+        "    input()\n",
+        namespace=external_namespace,
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO("answer\n"))
+    recorder = SetTraceRecorder(target_file=str(filename))
+
+    with recorder:
+        func()
+
+    returns = [item["call_return"]["function"] for item in recorder.recording if "call_return" in item]
+    assert returns == []
+    assert [item["event"] for item in recorder.recording if item["event"].startswith("input_")] == [
+        "input_prompt", "input_return"
+    ]
+
+
 def test_snapshots_capture_callers_oldest_first(tmp_path):
     func, filename = load_function(
         tmp_path,
@@ -327,7 +526,7 @@ def test_captures_stdout_and_echoed_stdin_as_console_deltas(tmp_path, monkeypatc
         "    print(f'Hello {name}')\n",
     )
     monkeypatch.setattr(sys, "stdin", io.StringIO("Ada\n"))
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     with recorder:
         func()
@@ -352,6 +551,10 @@ def test_captures_stdout_and_echoed_stdin_as_console_deltas(tmp_path, monkeypatc
     }
     assert input_events[1]["console"] == [{"stream": "stdin", "text": "Ada\n"}]
     assert capsys.readouterr().out == "Name? Hello Ada\n"
+    assert not any(
+        snapshot.get("call_return", {}).get("function") == "write"
+        for snapshot in recorder.recording
+    )
 
 
 def test_input_prompt_is_recorded_when_stdin_reaches_eof(tmp_path, monkeypatch):
@@ -361,7 +564,7 @@ def test_input_prompt_is_recorded_when_stdin_reaches_eof(tmp_path, monkeypatch):
         "    input('Enter your name: ')\n",
     )
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     with pytest.raises(EOFError):
         with recorder:
@@ -381,7 +584,7 @@ def test_console_capture_respects_character_limit(tmp_path, capsys):
         "def run():\n"
         "    print('abcdef')\n",
     )
-    recorder = TraceRecorder(target_file=str(filename), max_console_chars=3)
+    recorder = SetTraceRecorder(target_file=str(filename), max_console_chars=3)
 
     with recorder:
         func()
@@ -408,7 +611,7 @@ def test_exception_traceback_grows_outward_as_exception_unwinds(tmp_path):
         name="outer",
         namespace={},
     )
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     with pytest.raises(ValueError, match="bad input"):
         with recorder:
@@ -447,7 +650,7 @@ def test_traceback_includes_frame_that_started_recording(tmp_path):
     filename.write_text(source)
     namespace = {}
     exec(compile(source, str(filename), "exec"), namespace)
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     namespace["run"](recorder)
 
@@ -470,7 +673,7 @@ def test_records_only_frames_from_target_file(tmp_path):
         name="wrapper",
         namespace={"target": target},
     )
-    recorder = TraceRecorder(target_file=str(target_file))
+    recorder = SetTraceRecorder(target_file=str(target_file))
 
     with recorder:
         assert wrapper() == 42
@@ -495,7 +698,7 @@ def test_custom_serializers_use_first_match_and_copy_output(tmp_path):
         "    return value\n",
     )
     value = Child()
-    recorder = TraceRecorder(
+    recorder = SetTraceRecorder(
         [
             (
                 Parent,
@@ -525,7 +728,7 @@ def test_opaque_values_do_not_call_repr(tmp_path):
             raise AssertionError("repr must not be called")
 
     func, filename = load_function(tmp_path, "def run(value):\n    return value\n")
-    recorder = TraceRecorder(target_file=str(filename))
+    recorder = SetTraceRecorder(target_file=str(filename))
 
     with recorder:
         func(Opaque())
@@ -553,7 +756,7 @@ def test_limits_raise_and_preserve_recorded_snapshots(tmp_path, options, expecte
         "    value = [1]\n"
         "    return value\n",
     )
-    recorder = TraceRecorder(target_file=str(filename), **options)
+    recorder = SetTraceRecorder(target_file=str(filename), **options)
     previous_trace = sys.gettrace()
 
     with pytest.raises(RecordingLimitExceeded):
@@ -576,7 +779,7 @@ def test_user_can_catch_limit_error_and_get_partial_snapshots(tmp_path):
         "        return 'handled'\n",
         namespace=namespace,
     )
-    recorder = TraceRecorder(target_file=str(filename), max_snapshots=1)
+    recorder = SetTraceRecorder(target_file=str(filename), max_snapshots=1)
     previous_trace = sys.gettrace()
 
     with recorder:
@@ -603,7 +806,7 @@ def test_restores_previous_trace_when_limit_is_caught(tmp_path):
     def existing_trace(frame, event, arg):
         return existing_trace
 
-    recorder = TraceRecorder(target_file=str(filename), max_snapshots=1)
+    recorder = SetTraceRecorder(target_file=str(filename), max_snapshots=1)
     try:
         sys.settrace(existing_trace)
         with recorder:
@@ -621,7 +824,7 @@ def test_serializer_error_propagates_and_restores_trace(tmp_path):
         raise LookupError("serializer failed")
 
     func, filename = load_function(tmp_path, "def run(value):\n    return value\n")
-    recorder = TraceRecorder([(Value, broken_serializer)], target_file=str(filename))
+    recorder = SetTraceRecorder([(Value, broken_serializer)], target_file=str(filename))
     previous_trace = sys.gettrace()
     previous_stdout = sys.stdout
     previous_stdin = sys.stdin
@@ -637,10 +840,10 @@ def test_serializer_error_propagates_and_restores_trace(tmp_path):
 
 def test_invalid_limits_are_rejected():
     with pytest.raises(ValueError):
-        TraceRecorder(max_snapshots=0)
+        SetTraceRecorder(max_snapshots=0)
     with pytest.raises(ValueError):
-        TraceRecorder(max_depth=-1)
+        SetTraceRecorder(max_depth=-1)
     with pytest.raises(ValueError):
-        TraceRecorder(max_items=0)
+        SetTraceRecorder(max_items=0)
     with pytest.raises(ValueError):
-        TraceRecorder(max_console_chars=0)
+        SetTraceRecorder(max_console_chars=0)
