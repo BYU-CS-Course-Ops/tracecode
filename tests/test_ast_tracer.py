@@ -62,3 +62,28 @@ def test_ast_recorder_does_not_record_module_setup_when_activated_later(tmp_path
         item["event"] == "line" and item["function"] == "<module>"
         for item in recorder.recording
     )
+
+
+def test_ast_recorder_emits_return_event_inside_explicit_and_implicit_returns(tmp_path):
+    filename = tmp_path / "returns.py"
+    filename.write_text(
+        "def explicit(value):\n"
+        "    return value + 1\n"
+        "def implicit():\n"
+        "    result = 'done'\n"
+        "explicit(4)\n"
+        "implicit()\n"
+    )
+    namespace = {"__name__": "__main__", "__file__": str(filename)}
+    recorder = TraceRecorder(target_file=str(filename))
+
+    with recorder:
+        prepare_file(filename).execute(namespace)
+
+    returns = [item for item in recorder.recording if item["event"] == "return"]
+    assert [(item["function"], item["return"]["value"]) for item in returns] == [
+        ("explicit", {"type": "int", "data": 5}),
+        ("implicit", {"type": "NoneType", "data": None}),
+    ]
+    assert returns[0]["lineno"] == 2
+    assert returns[1]["function"] == "implicit"

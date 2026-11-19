@@ -44,6 +44,42 @@ class _StatementInstrumenter(ast.NodeTransformer):
         return node
 
 
+class _ReturnInstrumenter(ast.NodeTransformer):
+    def __init__(self, helper_name: str):
+        self.helper_name = helper_name
+
+    def _implicit_return_hook(self, node):
+        call = ast.Call(
+            func=ast.Name(id=self.helper_name, ctx=ast.Load()),
+            args=[ast.Constant(None)],
+            keywords=[],
+        )
+        hook = ast.Expr(value=call)
+        location = node.body[-1] if node.body else node
+        return ast.copy_location(hook, location)
+
+    def visit_Return(self, node: ast.Return):
+        self.generic_visit(node)
+        value = node.value if node.value is not None else ast.Constant(None)
+        hook = ast.Call(
+            func=ast.Name(id=self.helper_name, ctx=ast.Load()),
+            args=[value],
+            keywords=[],
+        )
+        node.value = ast.copy_location(hook, node.value or node)
+        return node
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        self.generic_visit(node)
+        node.body.append(self._implicit_return_hook(node))
+        return node
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        self.generic_visit(node)
+        node.body.append(self._implicit_return_hook(node))
+        return node
+
+
 class _ASTCallProxy:
     def __init__(self, recorder: TraceRecorder, function: Any, source_name: str):
         self.recorder = recorder
@@ -83,6 +119,15 @@ def _active_ast_line() -> None:
         recorder._record_snapshot(frame, "line", None)
 
 
+def _active_ast_return(value: Any) -> Any:
+    recorder = _ACTIVE_RECORDER.get()
+    if recorder is not None and recorder._active:
+        frame = inspect.currentframe().f_back
+        if os.path.realpath(frame.f_code.co_filename) == recorder._target_file:
+            recorder._record_snapshot(frame, "return", value)
+    return value
+
+
 class ASTPreparedSource(PreparedSource):
     """Source instrumented with AST hooks rather than interpreter tracing."""
 
@@ -95,17 +140,25 @@ class ASTPreparedSource(PreparedSource):
         self.call_helper_name = f"__tracecode_ast_call_{suffix}__"
         self.condition_helper_name = f"__tracecode_ast_condition_{suffix}__"
         self.line_helper_name = f"__tracecode_ast_line_{suffix}__"
+        self.return_helper_name = f"__tracecode_ast_return_{suffix}__"
         while names.intersection(
-            {self.call_helper_name, self.condition_helper_name, self.line_helper_name}
+            {
+                self.call_helper_name,
+                self.condition_helper_name,
+                self.line_helper_name,
+                self.return_helper_name,
+            }
         ):
             suffix = uuid.uuid4().hex
             self.call_helper_name = f"__tracecode_ast_call_{suffix}__"
             self.condition_helper_name = f"__tracecode_ast_condition_{suffix}__"
             self.line_helper_name = f"__tracecode_ast_line_{suffix}__"
+            self.return_helper_name = f"__tracecode_ast_return_{suffix}__"
 
         tree = _CallInstrumenter(self.call_helper_name, source).visit(tree)
         tree = _ConditionInstrumenter(self.condition_helper_name, source).visit(tree)
         tree = _StatementInstrumenter(self.line_helper_name).visit(tree)
+        tree = _ReturnInstrumenter(self.return_helper_name).visit(tree)
         ast.fix_missing_locations(tree)
         self._code = compile(tree, self.filename, "exec", dont_inherit=True)
 
@@ -114,6 +167,7 @@ class ASTPreparedSource(PreparedSource):
             self.call_helper_name: _active_ast_call_proxy,
             self.condition_helper_name: _active_record_condition,
             self.line_helper_name: _active_ast_line,
+            self.return_helper_name: _active_ast_return,
         }
         if any(name in namespace for name in helpers):
             raise RuntimeError("Prepared source helper name collides with its namespace")
