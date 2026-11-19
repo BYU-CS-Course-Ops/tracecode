@@ -47,6 +47,9 @@ def test_viewer_renders_custom_module_call_frame_without_locals():
     assert "for (const value of frame.function_call.positional_arguments || [])" in html
     assert "if (frame.module_complete)" in html
     assert "notice.textContent = frame.completion" in html
+    assert "conditionName.appendChild(conditionSource)" in html
+    assert "notice.append(conditionName, ' evaluated ', conditionResult)" in html
+    assert "functionName.appendChild(functionCode)" in html
     assert "`${returned.qualified_function}()`" in html
     assert "const isNoneReturn = returned.value.type === 'NoneType'" in html
     assert "frame.module_return || isNoneReturn" in html

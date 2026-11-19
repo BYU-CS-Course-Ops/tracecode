@@ -480,9 +480,11 @@
         notice.append('Condition ');
         const conditionSource = document.createElement('code');
         conditionSource.textContent = frame.condition.source;
+        const conditionName = document.createElement('strong');
+        conditionName.appendChild(conditionSource);
         const conditionResult = document.createElement('strong');
         conditionResult.textContent = frame.condition.result.data ? 'True' : 'False';
-        notice.append(conditionSource, ' evaluated ', conditionResult);
+        notice.append(conditionName, ' evaluated ', conditionResult);
         card.appendChild(notice);
       }
 
